@@ -1,0 +1,19 @@
+{
+  "name": "@web-checkout/e2e",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Interface tests (Chrome 1024x768, touch) and operational acceptance for Web Checkout.",
+  "scripts": {
+    "test:e2e": "playwright test --project kiosk",
+    "test:ops": "playwright test --project ops",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.13.3",
+    "@types/pg": "8.23.1",
+    "pg": "8.23.0",
+    "typescript": "~6.0.2"
+  }
+}

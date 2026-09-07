@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/coverage
+**/.git
+.git
+**/*.log
+.env*
+e2e
+docs
+specs
+.specify
+.claude
+PROCESS.md

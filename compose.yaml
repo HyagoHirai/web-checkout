@@ -1,0 +1,64 @@
+name: webcheckout
+
+services:
+  db:
+    image: postgres:18.6
+    environment:
+      POSTGRES_USER: checkout
+      POSTGRES_PASSWORD: checkout
+      POSTGRES_DB: webcheckout
+    volumes:
+      # postgres:18 moved the data directory: PGDATA=/var/lib/postgresql/18/docker, VOLUME=/var/lib/postgresql.
+      - pgdata:/var/lib/postgresql
+    ports:
+      # Published on loopback only, on a non-default host port so a local Postgres on 5432 does not collide.
+      # Tests connect here for fixtures. Override with DB_PORT.
+      - "127.0.0.1:${DB_PORT:-54329}:5432"
+    healthcheck:
+      # -h forces TCP: during first init the entrypoint runs a socket-only temporary server that a
+      # socket pg_isready would report as ready.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://checkout:checkout@db:5432/webcheckout
+      PORT: "3000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SIMULATOR_DEFAULT_OUTCOME: ${SIMULATOR_DEFAULT_OUTCOME:-success}
+      SIMULATOR_CLIENT_HINT: ${SIMULATOR_CLIENT_HINT:-allow}
+      SIMULATOR_LATENCY_MS: ${SIMULATOR_LATENCY_MS:-1500}
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 20s
+    init: true
+    restart: unless-stopped
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    ports:
+      - "${CLIENT_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+        restart: true
+    restart: unless-stopped
+
+volumes:
+  pgdata:

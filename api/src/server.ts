@@ -1,0 +1,57 @@
+import { loadConfig, type Config } from './config.ts';
+import { createLogger, type Logger } from './observability/logger.ts';
+import { createCounters } from './observability/counters.ts';
+import { createPool, waitForDatabase, type Pool } from './db/pool.ts';
+import { migrate } from './db/migrate.ts';
+import { seed } from './db/seed.ts';
+import { createSimulator } from './payment/simulator.ts';
+import { buildApp, type BootInfo } from './app.ts';
+
+/**
+ * Boot sequence (ADR-004, research R13): connect → migrate → seed → simulator → build app. The
+ * four startup lines in this order are the evidence that the API does not serve before schema and
+ * seed are ready; `startup.listening` is emitted by `main` after listen() resolves. `boot` is
+ * callable without listening so tests can assert the sequence.
+ */
+export async function boot(config: Config, logger: Logger, pool: Pool): Promise<{ app: ReturnType<typeof buildApp>; bootInfo: BootInfo }> {
+  await waitForDatabase(pool, logger);
+  const m = await migrate(pool, logger);
+  logger.info({ event: 'startup.migrations_applied', applied: m.applied, latest: m.latest }, 'migrations applied');
+  const s = await seed(pool);
+  logger.info({ event: 'startup.seed_applied', inserted: s.inserted, updated: s.updated }, 'seed applied');
+  const simulator = createSimulator({
+    defaultOutcome: config.simulatorDefaultOutcome,
+    latencyMs: config.simulatorLatencyMs,
+    acceptClientHint: config.simulatorAcceptClientHint,
+  });
+  logger.info(
+    { event: 'startup.simulator_configured', defaultOutcome: simulator.defaultOutcome, acceptClientHint: simulator.acceptClientHint, latencyMs: simulator.latencyMs },
+    'simulator configured',
+  );
+  const bootInfo: BootInfo = { migrations: m.latest, seed: s.inserted > 0 ? 'applied' : 'already-present' };
+  const app = buildApp({ pool, simulator, logger, counters: createCounters(), boot: bootInfo });
+  return { app, bootInfo };
+}
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const logger = createLogger(config.logLevel);
+  const pool = createPool(config.databaseUrl, logger);
+  try {
+    const { app } = await boot(config, logger, pool);
+    await app.listen({ port: config.port, host: '0.0.0.0' });
+    logger.info({ event: 'startup.listening', port: config.port }, 'listening');
+    const shutdown = (signal: string) => {
+      logger.info({ event: 'shutdown.signal', signal }, 'shutting down');
+      app.close().then(() => process.exit(0), () => process.exit(1));
+    };
+    process.once('SIGTERM', () => shutdown('SIGTERM'));
+    process.once('SIGINT', () => shutdown('SIGINT'));
+  } catch (err) {
+    logger.fatal({ event: 'startup.failed', err }, 'startup failed');
+    process.exit(1);
+  }
+}
+
+const invokedDirectly = process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href;
+if (invokedDirectly) void main();

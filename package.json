@@ -1,0 +1,25 @@
+{
+  "name": "web-checkout",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Self-service snack-bar kiosk checkout: menu, cart, simulated payment, with first-class failure handling.",
+  "type": "module",
+  "workspaces": [
+    "api",
+    "client",
+    "e2e"
+  ],
+  "engines": {
+    "node": ">=24 <25 || >=25"
+  },
+  "scripts": {
+    "typecheck": "npm run typecheck -w api && npm run typecheck -w client",
+    "test:unit": "npm test -w api -- --project api-unit && npm test -w client",
+    "test:integration": "npm test -w api -- --project api-integration",
+    "test": "npm run typecheck && npm test -w api && npm test -w client",
+    "test:e2e": "npm run test:e2e -w e2e",
+    "test:ops": "npm run test:ops -w e2e",
+    "dev:api": "npm run dev -w api",
+    "dev:client": "npm run dev -w client"
+  }
+}
