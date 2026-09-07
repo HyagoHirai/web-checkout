@@ -2,76 +2,163 @@
 
 *A record of the process, written as it happened rather than reconstructed afterwards.*
 
-> **Fill this in as you go.** The sections below are prompts, not a template to
-> complete at the end — reconstructed process notes read as reconstructed. The
-> entries that matter most are the ones about what didn't work.
-
 ---
 
 ## Before any tooling
 
-What I decided before opening an editor, and why those decisions came first.
+The five ADRs in `docs/adr/` were written before Spec Kit was installed; the commit history shows
+this. Scope (ADR-001) was decided first because it is the decision that shapes every other: happy
+path plus deliberate failure handling, not a broader feature set. The questions asked of the brief
+were the ones a cashier normally absorbs: what happens when the customer taps twice, walks away,
+or the network drops mid-payment. Everything excluded is listed with a reason in ADR-001, and the
+possible future directions are explicitly not requirements.
 
-*[The five ADRs in `docs/adr/` were written before Spec Kit was installed — the
-commit history shows this. Note here what the discovery process actually was:
-what questions you asked about the brief, what you decided was out of scope and
-why, what you were unsure about.]*
+The things I was unsure about were the numbers (timers, bounds, currency, reference format,
+target environment). They were left open in the specification as "values to be confirmed" rather
+than guessed, and set in clarification.
 
 ---
 
 ## The workflow
 
-*[Which tools, which order, and what each one was for. Spec Kit version, agent
-integration, the sequence of commands.]*
+Spec Kit 1.0.5 with the Claude Code integration, skills mode. Sequence on 2026-09-07:
+
+1. `/speckit-constitution` from the owner's draft: ten principles and governance, v1.0.0.
+2. `/speckit-specify` from the owner's specification: nine user stories, 34 functional
+   requirements, seven open values carried as identifiers instead of guessed.
+3. `/speckit-clarify`: five questions (timers; bounds; currency; reference format; late result on
+   the unresolved screen), then three owner decisions outside the question loop (target
+   environment, the "unreachable" reading, priority semantics).
+4. `/speckit-plan`: eight research agents in parallel (runtime, client, Postgres, migrations and
+   compose, testing, observability, money and identifiers, simulator), five adversarial verifiers
+   that tried to refute the load-bearing claims, one completeness critic. The first run hit a
+   session limit half-way; it was resumed and the cached results replayed.
+5. Two owner review rounds on the plan and design artifacts, then `/speckit-tasks` (93 tasks),
+   one `/speckit-analyze` pass, and `/speckit-implement`.
+
+Implementation order followed the owner's instruction: P1 complete and working (US1 to US5)
+before anything else, then US6 to US9, then the operational acceptance and this document.
 
 ---
 
 ## Where I overrode the tooling
 
-*[The agent proposes; you decide. Record the cases where you rejected a
-proposal, and the reasoning. This is the section that distinguishes using AI
-with judgment from being carried by it.]*
-
 | What was proposed | What I did instead | Why |
 |---|---|---|
-| | | |
+| The plan template's "assumption if silent: accepted" framing for owner decisions | Every proposal was decided explicitly; nothing took effect by silence | The constitution says the agent proposes and the owner decides. Silence is not a decision. |
+| Vitest 5.0.0 as the single runner (testing research) | Vitest 4.1.11 | Published two days before the plan, with 33 breaking changes; a poor thing to pin for a reviewer-run repository. |
+| Plain `INSERT` + catch `23505` + `ROLLBACK` + fresh `SELECT` (two researchers) | `INSERT … ON CONFLICT (idempotency_key) DO NOTHING RETURNING` as one autocommit statement, then a separate `SELECT` | Verified against the Postgres 18 documentation and source: it blocks on an uncommitted competitor and never errors, so the aborted-transaction trap ADR-004 names never arises. |
+| A multi-stage `tsc` build to `dist/` for the API image | Node 24 native type stripping, no build step | The lighter option; the two models are mutually exclusive because `.ts` import specifiers are not rewritten by `tsc`. |
+| A runtime override endpoint as the fallback if the on-screen simulator selector were rejected | Env default only; outcome changed by restarting the API | Rejecting one mechanism does not approve a different new one (owner's correction). |
+| The research claim that a second lookup "closes the write-window race" | Removed the claim; recorded the residual window in ADR-002 | A claim stronger than the mechanism. No lock added for a case needing a concurrent same-key replay and a menu change inside the same milliseconds. |
+| A shared `.ts` workspace package for constants | A plain `shared/` directory imported by relative path | Node refuses to type-strip `.ts` under `node_modules`; a workspace symlink would go through it. |
+| Cutting the test hooks in the submission service (proposed, then withdrawn by the owner) | Kept them; changed the language | They do not simulate a crash. They exercise a precise window and assert that an exception there leaves the row in `pending_payment`, never `failed`. That is a P1 invariant. |
 
 ---
 
 ## Where the AI got it wrong
 
-*[Be specific. Wrong assumptions, plausible-looking code that didn't hold up,
-requirements it quietly dropped. Include what you had to notice in order to
-catch it.]*
+Specific, because the point is what had to be noticed.
+
+- **Deadline regression on a late decline.** The first design set the inactivity deadline on
+  `unresolved → declined` from `lastActivityAt + 90 s`, which is earlier than the deadline in force
+  on the unresolved screen. A decline arriving at 100 s would have deleted the interaction on the
+  next tick. Caught in owner review by working the arithmetic (sentAt 0, unresolved valid to 128 s,
+  decline at 100 s). Fixed by preserving the deadline in force across the transition; the exact
+  counterexample is now a unit test.
+- **Admission keyed on the interaction, not the intent.** The first admission rule compared the
+  interaction id and the definiteness of the result. After a decline the customer stays in the
+  same interaction and creates a second key, so a late result for the first key would have passed
+  both checks and overwritten the live attempt. Caught in owner review. The rule now has five
+  conditions and requires the idempotency key to match the current submission.
+- **Two contradictory classifications of a 409.** One research section said "rejected before
+  payment", another said "look it up and show the recorded state". Caught in owner review;
+  replaced by one canonical four-category rule stated in the contract and applied by the client.
+- **Seed comparison that could never report "unchanged".** `IS DISTINCT FROM` over whole rows
+  included `updated_at`, which the proposed row takes from `now()`, so every restart would have
+  reported an update. Caught in owner review. The comparison now names the canonical columns.
+- **Re-sending the POST on reload.** The runtime keyed "send the POST" on entering the
+  `submitted` phase, which a reload's RESUME also does. Caught by the runtime unit test for reload
+  (two POSTs counted). The send is now keyed on the PAY event only.
+- **Four research claims refuted by the verifiers**: sessionStorage is not cleared on tab close
+  on desktop Chrome (session restore brings it back); Chrome does keep a page with an in-flight
+  fetch in the back/forward cache and delivers the response after restore; Playwright's clock does
+  fake `AbortSignal.timeout` since 1.59; mounting the Postgres 18 volume at the old path fails
+  loudly rather than silently losing data. Each changed a design detail; all are logged in
+  `research.md`.
+- **Test arithmetic.** Three interface and integration tests failed on their own mistakes: tapping
+  "+" nine times when eight reached the cap; a helper pricing from seed constants after the test
+  had changed the database price; and asserting a telemetry delta before the held response had
+  even been fetched. None was a product defect; all were found by running the tests.
 
 ---
 
 ## What changed after implementation started
 
-*[Decisions that survived contact with the code, and decisions that didn't.
-Where an ADR was amended because building the thing revealed something the
-document had wrong.]*
-
 | Document | What changed | What forced it |
 |---|---|---|
-| | | |
+| ADR-001 | Per-submission outcome selection on the simulated payment screen, with a server default | The demo must show a decline and an unknown outcome at the kiosk without a second device. Owner-approved. |
+| ADR-002 | "The validation window" added under "Where this still breaks" | The research claimed a race was closed that the mechanism only narrows. |
+| ADR-005 | `unresolved → confirmed \| declined` on a late result; monotonic per intent; deadline preserved | Clarification answer (FR-034) and the two review findings above. |
+| spec.md FR-031 | "a network wait of up to 8 s" | Polling starts earlier on a network rejection or an early pending; the wording read as fixed. |
+| spec.md SC-002, SC-003, FR-009, FR-010, SC-007 | Precision: at most one order per intent and exactly one where acceptance occurred; the guarantee is over the total; availability is checked at the validation point; SC-007 does not hold where the server was never reached | Owner review of the plan. |
+| data-model.md | `text` with CHECK instead of `char(n)`; JSONB snapshot instead of an `order_items` table; interaction id from the header | Research: `char` pads and compares oddly; a JSONB snapshot makes the accept path one statement with no explicit transaction. |
+| contracts/openapi.yaml | `202` for pending, strict UUID patterns, one event per telemetry POST, `503 reference_exhausted` | Research on response classification and beacon transport. |
+
+Nothing changed in the code that contradicts a document; where the code taught something, the
+document was amended first or in the same commit.
 
 ---
 
 ## What I threw away
 
-*[Approaches started and abandoned. Code deleted. Scope cut mid-flight.]*
+- The `order_items` table from the first data model, in favour of a JSONB snapshot (recorded in
+  data-model.md with the honest account of what the table would have done well).
+- The `/internal/simulator/calls` inspection endpoint one researcher proposed for interface tests.
+  Metrics deltas with a single Playwright worker are enough; an endpoint that exposes keys in a
+  no-auth demo was not worth it.
+- An automatic re-send of the POST on an early network rejection. Safe by construction, but a
+  second send path with its own accounting inside the bounded wait. Polling to "not found" and an
+  honest "check at the counter before ordering again" is one code path. The change condition is
+  recorded in research R10.
+- The stale-poll interface test as first written. The client cancels its own polls the instant a
+  terminal state shows, so a stale poll cannot arrive that way; the test now delivers the stale view
+  through the still-open POST, which is the path that can actually be late.
 
 ---
 
 ## What I'd do differently
 
-*[With more time, or knowing what I know now.]*
+- Run the adversarial verifiers on the *reconciled* research, not only on each researcher's own
+  claims. The two review rounds found contradictions between researchers (three test runners, two
+  insert mechanisms, two classifications of a 409) that a verifier pointed at the merged document
+  would have found without an owner's time.
+- Write the deadline and admission rules as tests before writing prose about them. Both defects the
+  owner caught were arithmetic; a unit test with the numbers would have caught them in minutes.
+- Start Docker before planning research that wants to observe Postgres live. One researcher had to
+  reason from the manual and the source because the daemon was down; the claims held, but the
+  observation should have come first.
+- Budget the plan-research workflow for the session limit. It stalled at 5 of 14 agents and had to
+  be resumed; the cache made that cheap, but it cost half an hour of wall clock.
 
 ---
 
 ## Review rounds
 
-*[This set of documents went through two rounds of external review before any
-code was written. Summarise what each round changed — particularly the findings
-that were genuine defects rather than refinements.]*
+This set of documents went through two rounds of external review before any code was written.
+
+**Round one** (on the first plan, research, data model and contracts) found: nginx chosen without
+its reason recorded; four documents repeating a stale "silent data loss" story about the Postgres
+volume path that the verifier had already corrected; three incompatible test-runner choices; two
+incompatible TypeScript execution models; `format: uuid` in the contract versus a strict pattern in
+the research; the interaction id in the body in one document and in a header in another. All
+refinements, resolved by reconciliation.
+
+**Round two** (on the corrected documents) found genuine defects, not refinements: the deadline
+regression on a late decline; response admission keyed on the interaction rather than the intent;
+a contradictory 409 classification; a seed comparison that could never report "unchanged"; and a
+claim that a race was closed when it was only narrowed. The owner's instruction after that round
+was to fix them, run one analysis pass, and build, because "each round found real things, but the
+point of diminishing return is close". The analysis pass found nothing above MEDIUM. Everything
+found after that is in the section above, found by tests during implementation, which is where it
+belongs.

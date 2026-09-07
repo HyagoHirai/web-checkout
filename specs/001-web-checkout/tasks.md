@@ -41,7 +41,7 @@ User Story 9 optional (owner decision, spec Clarifications).
 - [X] T006 [P] Create `api/Dockerfile` (node:24.20.0-bookworm-slim; WORKDIR /app; copy root package.json + package-lock.json + api/package.json; `npm ci -w api --omit=dev`; copy `shared/` and `api/`; USER node; EXPOSE 3000; `CMD ["node","api/src/server.ts"]`) with build context = repo root
 - [X] T007 [P] Create `client/Dockerfile` (stage 1 node:24.20.0-bookworm-slim: `npm ci -w client`, copy `shared/` + `client/`, `npm run build -w client`; stage 2 nginx:1.30.4-alpine: copy `client/dist` to `/usr/share/nginx/html`, copy `client/nginx.conf` to `/etc/nginx/conf.d/default.conf`) and `client/nginx.conf` (listen 80; root; `location / { try_files $uri /index.html; }`; `location /api/ { proxy_pass http://api:3000; proxy_http_version 1.1; }` with NO trailing slash on proxy_pass; index.html served without no-store)
 - [X] T008 Create `compose.yaml` per research R12: services `db` (postgres:18.6, POSTGRES_USER checkout, POSTGRES_PASSWORD checkout, POSTGRES_DB webcheckout, volume `pgdata:/var/lib/postgresql`, healthcheck `pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB` interval 2s retries 15, ports `127.0.0.1:${DB_PORT:-54329}:5432`), `api` (build context `.` dockerfile `api/Dockerfile`, env DATABASE_URL, PORT 3000, SIMULATOR_DEFAULT_OUTCOME success, SIMULATOR_CLIENT_HINT allow, SIMULATOR_LATENCY_MS 1500, LOG_LEVEL info; `depends_on: db: {condition: service_healthy, restart: true}`; healthcheck `node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"` interval 2s start_period 20s retries 15; init true; restart unless-stopped), `client` (build context `.` dockerfile `client/Dockerfile`, ports `${CLIENT_PORT:-8080}:80`, `depends_on: api: {condition: service_healthy, restart: true}`); named volume `pgdata`; no `version:` key
-- [ ] T009 Create `README.md`: the one command, prerequisites (Docker Desktop or Engine ≥ 25 with Compose + Buildx; Node 24 for tests only; `npx playwright install chromium`), ports and the two env overrides, where data lives (`/var/lib/postgresql` on the 18.x image), test commands, the simulator selector and env vars, counters reset on restart, the residual validation window (ADR-002)
+- [X] T009 Create `README.md`: the one command, prerequisites (Docker Desktop or Engine ≥ 25 with Compose + Buildx; Node 24 for tests only; `npx playwright install chromium`), ports and the two env overrides, where data lives (`/var/lib/postgresql` on the 18.x image), test commands, the simulator selector and env vars, counters reset on restart, the residual validation window (ADR-002)
 
 **Checkpoint**: `npm ci` at root succeeds; `docker compose config` validates.
 
@@ -78,17 +78,17 @@ shape, app factory, boot, simulator, domain modules, the client machine core.
 
 ### Client foundation
 
-- [ ] T029 [P] Create `client/src/machine/types.ts` per data-model.md: `Interaction` (id, startedAt, lastActivityAt, phase, resolvedAt, deadlineAt, submission), `Submission` (idempotencyKey, lines[], expectedTotalMinor, sentAt, pollStartedAt, knownState, reference, simulation), `Cart` (lines, flagged), `Menu`, and the event union: START, MENU_LOADED, MENU_FAILED, ADD_ITEM, SET_QTY, REMOVE_ITEM, GO_REVIEW, GO_PAYMENT, BACK_TO_CART, SET_SIMULATION, PAY, POST_RESULT, POLL_RESULT, POLL_START, TICK, CONTINUE, START_NEW_ORDER, RESUME, plus a `now` on every event
-- [ ] T030 [P] Create `client/src/machine/uuid.ts`: `newUuid()` = `crypto.randomUUID()` when present, else v4 from `crypto.getRandomValues` with version/variant bits, lowercase
-- [ ] T031 [P] Create `client/src/machine/deadlines.ts` per research R4 / data-model: `waitEndedAt(sub)`, `inactivityDeadline(state)` implementing the phase table (building/declined: `lastActivityAt + 90 s`; unresolved: `max(lastActivityAt, waitEndedAt) + 90 s`; declined-from-unresolved: `deadlineAt`; confirmed: `resolvedAt + 15 s`; submitted: none), `warningAt(state)` (deadline − 15 s), `isExpired(state, now)`
-- [ ] T032 [P] Create `client/src/machine/storage.ts`: `save(interaction)`, `load()`, `clear()` over `sessionStorage` key `webcheckout.interaction`, every access in try/catch; `load()` validates shape and returns null on any doubt
-- [ ] T033 Create `client/src/machine/reducer.ts`: pure `reduce(state, event)` over phases idle/building/submitted/confirmed/declined/unresolved; activity whitelist (ADD_ITEM, SET_QTY, REMOVE_ITEM, GO_REVIEW, GO_PAYMENT, BACK_TO_CART, SET_SIMULATION, PAY, CONTINUE) stamps `lastActivityAt` and clears `deadlineAt`; cart rules (qty 1..10, sum ≤ 50, total ≤ 100000, unavailable cannot be added, qty 0 removes); GO_PAYMENT generates a key and persists the frozen lines + expectedTotalMinor; BACK_TO_CART before send discards the key; PAY sets `sentAt`; the five-condition admission rule for POST_RESULT/POLL_RESULT keyed on `interactionId` and `idempotencyKey` from the event; `unresolved → declined` carries `deadlineAt = inactivityDeadline(prev)`; terminal results not reapplied; RESUME/TICK expiry → idle with storage cleared; START_NEW_ORDER → idle
-- [ ] T034 Create `client/src/machine/runtime.ts`: module-level store (`getState`, `subscribe`, `dispatch`) with write-through to storage on every transition; 250 ms ticker dispatching TICK; `revalidate()` on boot, `pageshow` (both persisted values) and `visibilitychange → visible`, run synchronously before any queued response is admitted; POST race: `fetch` never aborted, closure captures `{ interactionId, idempotencyKey }` and dispatches POST_RESULT with the classified result; polling loop by key every 2 s from `pollStartedAt` until `waitEndedAt` with per-poll `AbortSignal.timeout(2000)` and a polls-only `AbortController` cancelled on terminal/interaction end; confirmation auto-idle at `resolvedAt + 15 s`
-- [ ] T035 [P] Create `client/src/api/client.ts`: `fetchMenu()`, `postOrder(submission, interactionId)`, `lookupByKey(key, interactionId)` with `X-Interaction-Id`; `classify(response|error)` implementing the four-category canonical rule from contracts/openapi.yaml (known outcome / intent conflict / rejected / unknown), never by status family alone
-- [ ] T036 [P] Create `client/src/api/telemetry.ts`: `emit(name, detail?)` → `navigator.sendBeacon('/api/events', JSON.stringify(...))` string body; fallback `fetch` keepalive with `content-type: text/plain;charset=UTF-8`; never awaited, try/catch, no queue
-- [ ] T037 [P] Create `client/src/money/format.ts` (module-level `Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })`, `formatMinor(minor)`) and `client/src/styles.css` (touch targets ≥ 64 px, `touch-action: manipulation`, `user-select: none` on controls, `html { overscroll-behavior: none }`, 1024×768 layout, high contrast, large type)
-- [ ] T038 Create `client/src/main.tsx` (StrictMode, mount, `runtime.boot()`) and `client/src/App.tsx` (`useSyncExternalStore` over the runtime; switch on phase/screen to render the screen components; render `InactivityWarning` overlay when `now ≥ warningAt` and the timer runs)
-- [ ] T039 Create `client/test/setup.ts` (jest-dom) and `client/test/helpers.ts` (state builders, fake `fetch`, `advance(ms)` with `vi.useFakeTimers`)
+- [X] T029 [P] Create `client/src/machine/types.ts` per data-model.md: `Interaction` (id, startedAt, lastActivityAt, phase, resolvedAt, deadlineAt, submission), `Submission` (idempotencyKey, lines[], expectedTotalMinor, sentAt, pollStartedAt, knownState, reference, simulation), `Cart` (lines, flagged), `Menu`, and the event union: START, MENU_LOADED, MENU_FAILED, ADD_ITEM, SET_QTY, REMOVE_ITEM, GO_REVIEW, GO_PAYMENT, BACK_TO_CART, SET_SIMULATION, PAY, POST_RESULT, POLL_RESULT, POLL_START, TICK, CONTINUE, START_NEW_ORDER, RESUME, plus a `now` on every event
+- [X] T030 [P] Create `client/src/machine/uuid.ts`: `newUuid()` = `crypto.randomUUID()` when present, else v4 from `crypto.getRandomValues` with version/variant bits, lowercase
+- [X] T031 [P] Create `client/src/machine/deadlines.ts` per research R4 / data-model: `waitEndedAt(sub)`, `inactivityDeadline(state)` implementing the phase table (building/declined: `lastActivityAt + 90 s`; unresolved: `max(lastActivityAt, waitEndedAt) + 90 s`; declined-from-unresolved: `deadlineAt`; confirmed: `resolvedAt + 15 s`; submitted: none), `warningAt(state)` (deadline − 15 s), `isExpired(state, now)`
+- [X] T032 [P] Create `client/src/machine/storage.ts`: `save(interaction)`, `load()`, `clear()` over `sessionStorage` key `webcheckout.interaction`, every access in try/catch; `load()` validates shape and returns null on any doubt
+- [X] T033 Create `client/src/machine/reducer.ts`: pure `reduce(state, event)` over phases idle/building/submitted/confirmed/declined/unresolved; activity whitelist (ADD_ITEM, SET_QTY, REMOVE_ITEM, GO_REVIEW, GO_PAYMENT, BACK_TO_CART, SET_SIMULATION, PAY, CONTINUE) stamps `lastActivityAt` and clears `deadlineAt`; cart rules (qty 1..10, sum ≤ 50, total ≤ 100000, unavailable cannot be added, qty 0 removes); GO_PAYMENT generates a key and persists the frozen lines + expectedTotalMinor; BACK_TO_CART before send discards the key; PAY sets `sentAt`; the five-condition admission rule for POST_RESULT/POLL_RESULT keyed on `interactionId` and `idempotencyKey` from the event; `unresolved → declined` carries `deadlineAt = inactivityDeadline(prev)`; terminal results not reapplied; RESUME/TICK expiry → idle with storage cleared; START_NEW_ORDER → idle
+- [X] T034 Create `client/src/machine/runtime.ts`: module-level store (`getState`, `subscribe`, `dispatch`) with write-through to storage on every transition; 250 ms ticker dispatching TICK; `revalidate()` on boot, `pageshow` (both persisted values) and `visibilitychange → visible`, run synchronously before any queued response is admitted; POST race: `fetch` never aborted, closure captures `{ interactionId, idempotencyKey }` and dispatches POST_RESULT with the classified result; polling loop by key every 2 s from `pollStartedAt` until `waitEndedAt` with per-poll `AbortSignal.timeout(2000)` and a polls-only `AbortController` cancelled on terminal/interaction end; confirmation auto-idle at `resolvedAt + 15 s`
+- [X] T035 [P] Create `client/src/api/client.ts`: `fetchMenu()`, `postOrder(submission, interactionId)`, `lookupByKey(key, interactionId)` with `X-Interaction-Id`; `classify(response|error)` implementing the four-category canonical rule from contracts/openapi.yaml (known outcome / intent conflict / rejected / unknown), never by status family alone
+- [X] T036 [P] Create `client/src/api/telemetry.ts`: `emit(name, detail?)` → `navigator.sendBeacon('/api/events', JSON.stringify(...))` string body; fallback `fetch` keepalive with `content-type: text/plain;charset=UTF-8`; never awaited, try/catch, no queue
+- [X] T037 [P] Create `client/src/money/format.ts` (module-level `Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })`, `formatMinor(minor)`) and `client/src/styles.css` (touch targets ≥ 64 px, `touch-action: manipulation`, `user-select: none` on controls, `html { overscroll-behavior: none }`, 1024×768 layout, high contrast, large type)
+- [X] T038 Create `client/src/main.tsx` (StrictMode, mount, `runtime.boot()`) and `client/src/App.tsx` (`useSyncExternalStore` over the runtime; switch on phase/screen to render the screen components; render `InactivityWarning` overlay when `now ≥ warningAt` and the timer runs)
+- [X] T039 Create `client/test/setup.ts` (jest-dom) and `client/test/helpers.ts` (state builders, fake `fetch`, `advance(ms)` with `vi.useFakeTimers`)
 - [X] T040 Create `api/src/routes/events.ts`: inside its own plugin scope `addContentTypeParser('text/plain', { parseAs: 'string', bodyLimit: 4096 }, getDefaultJsonParser('ignore','ignore'))`; `POST /api/events` with the `ClientEvent` schema (closed, enum names, UUID patterns, bounded detail) → log `client.event_received`, `counters.inc('client_event.<name>')`, 204; schema failure → 400 counted as `client_event.rejected`
 
 **Checkpoint**: `npm run typecheck` passes for api and client; `docker compose up --build` reaches
@@ -109,17 +109,17 @@ Approve, see a 4-character reference, wait 15 s, see idle. `payment.executed.suc
 
 - [X] T041 [P] [US1] Integration test `api/test/integration/submit-happy.test.ts`: POST accepted → 201 `paid`, `replay: false`, reference matches the alphabet, `interactionId` echoed; row `paid` with `outcome_recorded_at` set; snapshot holds names, unit prices, line totals; `orders.accepted` and `payment.executed.success` +1; `GET /api/menu` shape; `GET /api/health` shape
 - [X] T042 [P] [US1] Integration test `api/test/integration/validation.test.ts` (US1 bounds part): quantity 11 → 422 `quantity_out_of_bounds`; 51 units → `units_out_of_bounds`; total 100001 → `total_out_of_bounds`; empty lines → 400 (schema); unavailable item → `item_unavailable` with `currentItems`; `"1250"` as string → 400; exactly 10 / 50 / 100000 accepted; no row on any rejection and the key remains usable
-- [ ] T043 [P] [US1] Reducer tests `client/test/reducer.test.ts` (US1 part): add/adjust/remove, qty 0 removes, unavailable not added, 11th refused, 51st unit refused, total cap; GO_REVIEW blocked on empty cart; GO_PAYMENT generates a key and freezes lines; expectedTotalMinor equals the review total from the same cart
-- [ ] T044 [P] [US1] Interface test `e2e/tests/us1-order-and-pay.spec.ts`: the full flow at 1024×768 with `locator.tap()`; reference visible and matches `^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$`; `page.clock` `runFor(15000)` → idle; metrics delta `payment.executed.success` = 1
+- [X] T043 [P] [US1] Reducer tests `client/test/reducer.test.ts` (US1 part): add/adjust/remove, qty 0 removes, unavailable not added, 11th refused, 51st unit refused, total cap; GO_REVIEW blocked on empty cart; GO_PAYMENT generates a key and freezes lines; expectedTotalMinor equals the review total from the same cart
+- [X] T044 [P] [US1] Interface test `e2e/tests/us1-order-and-pay.spec.ts`: the full flow at 1024×768 with `locator.tap()`; reference visible and matches `^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$`; `page.clock` `runFor(15000)` → idle; metrics delta `payment.executed.success` = 1
 
 ### Implementation for User Story 1
 
 - [X] T045 [US1] Create `api/src/services/orders.ts`: `submit({ body, interactionId, requestedOutcome })` implementing research R5 steps 1–8 exactly (fingerprint → SELECT by key → validate → on failure SELECT once more → `INSERT … ON CONFLICT (idempotency_key) DO NOTHING RETURNING` with reference retry on `err.constraint === 'orders_reference_key'` up to 5 then `reference_exhausted` → owner path: `hooks.afterCommit?.()`, `simulator.execute`, `hooks.afterPayment?.()`, conditional UPDATE, 0-row → `payment.outcome_record_failed` + throw) and `lookupByKey(key)`; response mapping 201/202/200/409/422/503 with `replay`; every branch logs its event and increments its counter
 - [X] T046 [US1] Create `api/src/routes/orders.ts`: `POST /api/orders` with the `OrderSubmission` JSON schema (additionalProperties false, UUID patterns, bounds, `simulation.outcome` enum, `X-Interaction-Id` header required) calling `submit`; `GET /api/orders/by-key/:idempotencyKey` (pattern-validated param, header required) → `OrderStatus` or 404 `not_found`; register both in `app.ts`
-- [ ] T047 [P] [US1] Create `client/src/screens/Idle.tsx` (S0: invitation, Start) and `client/src/screens/Menu.tsx` (S1: items with price/availability, add disabled when unavailable, cart with +/−/remove, running total, flagged lines, Review disabled on empty or flagged, Start new order)
-- [ ] T048 [P] [US1] Create `client/src/screens/Review.tsx` (S2: full order and total, Confirm and pay, Back, Start new order) and `client/src/screens/Payment.tsx` (S3: "Simulated payment" heading and copy, total, Approve/Decline/No answer selector defaulting to Approve, primary Pay, Back before send, Start new order)
-- [ ] T049 [P] [US1] Create `client/src/screens/Waiting.tsx` (S4: in-progress state, Pay not tappable, Start new order only) and `client/src/screens/Confirmed.tsx` (S5: success, reference large, total, "quote this at the counter", Done)
-- [ ] T050 [US1] Wire START → `fetchMenu` → MENU_LOADED in `client/src/machine/runtime.ts`; PAY → `postOrder` with the frozen submission and `simulation`; classified `paid` → confirmed with `resolvedAt`; `resolvedAt + 15 s` → idle and storage cleared
+- [X] T047 [P] [US1] Create `client/src/screens/Idle.tsx` (S0: invitation, Start) and `client/src/screens/Menu.tsx` (S1: items with price/availability, add disabled when unavailable, cart with +/−/remove, running total, flagged lines, Review disabled on empty or flagged, Start new order)
+- [X] T048 [P] [US1] Create `client/src/screens/Review.tsx` (S2: full order and total, Confirm and pay, Back, Start new order) and `client/src/screens/Payment.tsx` (S3: "Simulated payment" heading and copy, total, Approve/Decline/No answer selector defaulting to Approve, primary Pay, Back before send, Start new order)
+- [X] T049 [P] [US1] Create `client/src/screens/Waiting.tsx` (S4: in-progress state, Pay not tappable, Start new order only) and `client/src/screens/Confirmed.tsx` (S5: success, reference large, total, "quote this at the counter", Done)
+- [X] T050 [US1] Wire START → `fetchMenu` → MENU_LOADED in `client/src/machine/runtime.ts`; PAY → `postOrder` with the frozen submission and `simulation`; classified `paid` → confirmed with `resolvedAt`; `resolvedAt + 15 s` → idle and storage cleared
 
 **Checkpoint**: User Story 1 works in the compose stack and its four test files pass.
 
@@ -138,12 +138,12 @@ submission → same key, same status; a separate order with identical items → 
 
 - [X] T051 [P] [US2] Integration test `api/test/integration/concurrency.test.ts`: `beforeInsert` barrier holding 8 injected POSTs (pool max 10) released together → exactly one row, `callsFor(key).length === 1`, every response carries the same `orderId`, statuses one 201 and seven 200/202, states in {paid, pending_payment}; `beforeInsert` placed before pool acquisition
 - [X] T052 [P] [US2] Integration test `api/test/integration/replay.test.ts`: replay same key+content → 200 `replay: true` with recorded state, count unchanged; replay with `simulation: declined` on a paid order → still paid; replay after the menu price changed → recorded values, not re-validated; replay after item made unavailable → still served; same key different quantity → 409, row unchanged; different key identical items → new order; replay with lines reordered → 200 (fingerprint stable)
-- [ ] T053 [P] [US2] Reducer/runtime tests `client/test/runtime.test.ts` (US2 part): PAY sends once; a second PAY while submitted is a no-op; RESUME in `submitted` re-reads the key and starts polling without re-POSTing; BACK_TO_CART while submitted/unresolved is refused; START_NEW_ORDER while submitted ends the interaction without a new POST; GO_PAYMENT after a decline generates a new key
-- [ ] T054 [P] [US2] Interface test `e2e/tests/us2-repeat-submission.spec.ts`: double tap via `page.touchscreen.tap` twice → one confirmation, POST count 1, metrics delta 1; reload mid-wait (No answer) → same waiting screen, later S7a with the same reference, metrics delta 1; Start new order during unknown → idle, no second POST; two separate identical orders → two references
+- [X] T053 [P] [US2] Reducer/runtime tests `client/test/runtime.test.ts` (US2 part): PAY sends once; a second PAY while submitted is a no-op; RESUME in `submitted` re-reads the key and starts polling without re-POSTing; BACK_TO_CART while submitted/unresolved is refused; START_NEW_ORDER while submitted ends the interaction without a new POST; GO_PAYMENT after a decline generates a new key
+- [X] T054 [P] [US2] Interface test `e2e/tests/us2-repeat-submission.spec.ts`: double tap via `page.touchscreen.tap` twice → one confirmation, POST count 1, metrics delta 1; reload mid-wait (No answer) → same waiting screen, later S7a with the same reference, metrics delta 1; Start new order during unknown → idle, no second POST; two separate identical orders → two references
 
 ### Implementation for User Story 2
 
-- [ ] T055 [US2] In `client/src/machine/reducer.ts` and `runtime.ts`: freeze the key at PAY; persist `sentAt`; refuse BACK_TO_CART in submitted/unresolved; START_NEW_ORDER from any phase clears storage and never re-sends; RESUME in `submitted` restores the frozen submission and resumes the wait from persisted timestamps
+- [X] T055 [US2] In `client/src/machine/reducer.ts` and `runtime.ts`: freeze the key at PAY; persist `sentAt`; refuse BACK_TO_CART in submitted/unresolved; START_NEW_ORDER from any phase clears storage and never re-sends; RESUME in `submitted` restores the frozen submission and resumes the wait from persisted timestamps
 - [X] T056 [US2] In `api/src/services/orders.ts`: confirm the `beforeInsert` hook call site precedes `pool` acquisition; add `payment.executed` log with `source`; ensure the losing path never reads `simulation`
 
 **Checkpoint**: US1 and US2 pass together; the concurrency test is deterministic across 10 runs.
@@ -162,13 +162,13 @@ accepted.
 ### Tests for User Story 3
 
 - [X] T057 [P] [US3] Integration test `api/test/integration/validation.test.ts` (US3 part): price changed → 422 `price_mismatch` with `currentTotalMinor` and `currentItems`; no row; key reusable; two prices moved by equal and opposite amounts → 201 accepted; counters `orders.validation_rejected.price_mismatch`
-- [ ] T058 [P] [US3] Reducer test `client/test/reducer.test.ts` (US3 part): a rejected submission with `currentItems` re-prices the cart, clears the key, and the next GO_PAYMENT produces a new key and a new expectedTotalMinor equal to the re-priced review total
-- [ ] T059 [P] [US3] Interface test `e2e/tests/us3-price-changed.spec.ts`: pg fixture raises a price after the cart is built → S8 shows current price and new total → Review again → confirm → accepted at the new total; metrics: `price_mismatch` +1, `orders.accepted` +1; fixture restored in teardown
+- [X] T058 [P] [US3] Reducer test `client/test/reducer.test.ts` (US3 part): a rejected submission with `currentItems` re-prices the cart, clears the key, and the next GO_PAYMENT produces a new key and a new expectedTotalMinor equal to the re-priced review total
+- [X] T059 [P] [US3] Interface test `e2e/tests/us3-price-changed.spec.ts`: pg fixture raises a price after the cart is built → S8 shows current price and new total → Review again → confirm → accepted at the new total; metrics: `price_mismatch` +1, `orders.accepted` +1; fixture restored in teardown
 
 ### Implementation for User Story 3
 
-- [ ] T060 [US3] Create `client/src/screens/Rejected.tsx` (S8: reason copy per `reasons[]`, current prices and total for price_mismatch, flagged lines for item_unavailable, plain reason for bounds/unknown; Review again; Start new order) and wire the `rejected` classification → S8 in `reducer.ts`; on Review again re-fetch the menu, re-price the cart, discard the key, emit `rejection_shown`
-- [ ] T061 [US3] Create `e2e/fixtures/db.ts`: `withMenuChange({ slug, priceMinor?, available? })` via `pg` on `127.0.0.1:${DB_PORT:-54329}`, restoring the original row in teardown
+- [X] T060 [US3] Create `client/src/screens/Rejected.tsx` (S8: reason copy per `reasons[]`, current prices and total for price_mismatch, flagged lines for item_unavailable, plain reason for bounds/unknown; Review again; Start new order) and wire the `rejected` classification → S8 in `reducer.ts`; on Review again re-fetch the menu, re-price the cart, discard the key, emit `rejection_shown`
+- [X] T061 [US3] Create `e2e/fixtures/db.ts`: `withMenuChange({ slug, priceMinor?, available? })` via `pg` on `127.0.0.1:${DB_PORT:-54329}`, restoring the original row in teardown
 
 **Checkpoint**: US1–US3 pass.
 
@@ -187,13 +187,13 @@ POST → polling to 404 → S7b without reference; late `paid` on S7 → S5.
 
 - [X] T062 [P] [US4] Integration test `api/test/integration/post-commit-windows.test.ts`: `afterCommit` throws → 500, row `pending_payment` from a separate connection, 0 simulator calls, `payment.post_commit_exception` +1, replay → 202 count unchanged; `afterPayment` throws → 500, row pending, 1 call, replay 202 count unchanged; inconclusive → 202 `pending_payment`, row pending, 1 call; outcome UPDATE on a row forced to `paid` beforehand → 0 rows → 500 and `payment.outcome_record_failed` +1
 - [X] T063 [P] [US4] Integration test `api/test/integration/lookup.test.ts`: by-key 200 for each state with `interactionId` echoed from the request header; unknown key → 404 `not_found` and `status_lookup.not_found` +1; malformed key → 400
-- [ ] T064 [P] [US4] Runtime tests `client/test/runtime.test.ts` (US4 part) with fake timers and injected fetch: no response → POLL_START at 8 s → polls every 2 s → unresolved at 38 s; network rejection at 1 s → polling starts at 1 s and ends at 31 s; `202` at 0.5 s → polling from 0.5 s to 30.5 s; `404` polls keep `knownState: none`; a `pending` poll sets `knownState: pending` and reference; late `paid` from the still-open POST after unresolved → confirmed; a generic 500 → unknown, never declined; polling stops on terminal
-- [ ] T065 [P] [US4] Deadline tests `client/test/deadlines.test.ts`: unresolved deadline `max(lastActivityAt, waitEndedAt) + 90 s`; the review's counterexample (sentAt 0, lastActivityAt 0, late decline at 100 s) keeps the interaction valid until 128 s; a repeated `paid` does not move `resolvedAt`
-- [ ] T066 [P] [US4] Interface test `e2e/tests/us4-unknown-outcome.spec.ts`: No answer → S7a with reference, no pay-again control, inactivity resumes and idle follows; `route.abort()` → S7b without reference; `route.fetch()` then `abort('connectionreset')` → polling finds the order → S7a; `route.fetch()` then `fulfill 500` → unknown → S7a; `route.fetch()` then delayed fulfill after 40 s of clock → S7 → S5; `unresolved_shown` event observed via `client_event.unresolved_shown` delta
+- [X] T064 [P] [US4] Runtime tests `client/test/runtime.test.ts` (US4 part) with fake timers and injected fetch: no response → POLL_START at 8 s → polls every 2 s → unresolved at 38 s; network rejection at 1 s → polling starts at 1 s and ends at 31 s; `202` at 0.5 s → polling from 0.5 s to 30.5 s; `404` polls keep `knownState: none`; a `pending` poll sets `knownState: pending` and reference; late `paid` from the still-open POST after unresolved → confirmed; a generic 500 → unknown, never declined; polling stops on terminal
+- [X] T065 [P] [US4] Deadline tests `client/test/deadlines.test.ts`: unresolved deadline `max(lastActivityAt, waitEndedAt) + 90 s`; the review's counterexample (sentAt 0, lastActivityAt 0, late decline at 100 s) keeps the interaction valid until 128 s; a repeated `paid` does not move `resolvedAt`
+- [X] T066 [P] [US4] Interface test `e2e/tests/us4-unknown-outcome.spec.ts`: No answer → S7a with reference, no pay-again control, inactivity resumes and idle follows; `route.abort()` → S7b without reference; `route.fetch()` then `abort('connectionreset')` → polling finds the order → S7a; `route.fetch()` then `fulfill 500` → unknown → S7a; `route.fetch()` then delayed fulfill after 40 s of clock → S7 → S5; `unresolved_shown` event observed via `client_event.unresolved_shown` delta
 
 ### Implementation for User Story 4
 
-- [ ] T067 [US4] Create `client/src/screens/Unresolved.tsx` (S7a and S7b wordings from contracts/ui-states.md; the NFR-004 exception stated; Start new order only) and wire polling, `knownState`, S7a/S7b selection, `unresolved_shown`/`late_result_applied` emission and FR-034 transitions in `reducer.ts`/`runtime.ts`
+- [X] T067 [US4] Create `client/src/screens/Unresolved.tsx` (S7a and S7b wordings from contracts/ui-states.md; the NFR-004 exception stated; Start new order only) and wire polling, `knownState`, S7a/S7b selection, `unresolved_shown`/`late_result_applied` emission and FR-034 transitions in `reducer.ts`/`runtime.ts`
 - [X] T068 [US4] In `api/src/services/orders.ts`: wrap the post-commit window so any exception logs `payment.post_commit_exception`, leaves the row untouched, and rethrows to a 500; never map an exception to `failed`
 
 **Checkpoint**: US1–US4 pass. P1 core is complete except US5.
@@ -211,13 +211,13 @@ zero orders for the abandoned cart.
 
 ### Tests for User Story 5
 
-- [ ] T069 [P] [US5] Reducer/deadline tests `client/test/reducer.test.ts` and `client/test/storage.test.ts` (US5 part): only whitelisted events stamp activity (TICK, POLL_RESULT, MENU_LOADED do not); CONTINUE counts; expiry → idle and `clear()`; a record older than its deadline is rejected on `load()`; a restored `submitted` record continues from persisted `sentAt`; entering unresolved stamps nothing
-- [ ] T070 [P] [US5] Interface test `e2e/tests/us5-abandonment.spec.ts`: `page.clock` to 75 s → warning visible; Continue → warning gone and timer restarted; to 90 s → idle; reload → idle; `goto('about:blank')` then `goBack()` → idle (both restore paths asserted via `pageshow`); abandoned cart → `orders.accepted` delta 0; No answer then Start new order → order still `pending_payment` by key
+- [X] T069 [P] [US5] Reducer/deadline tests `client/test/reducer.test.ts` and `client/test/storage.test.ts` (US5 part): only whitelisted events stamp activity (TICK, POLL_RESULT, MENU_LOADED do not); CONTINUE counts; expiry → idle and `clear()`; a record older than its deadline is rejected on `load()`; a restored `submitted` record continues from persisted `sentAt`; entering unresolved stamps nothing
+- [X] T070 [P] [US5] Interface test `e2e/tests/us5-abandonment.spec.ts`: `page.clock` to 75 s → warning visible; Continue → warning gone and timer restarted; to 90 s → idle; reload → idle; `goto('about:blank')` then `goBack()` → idle (both restore paths asserted via `pageshow`); abandoned cart → `orders.accepted` delta 0; No answer then Start new order → order still `pending_payment` by key
 
 ### Implementation for User Story 5
 
-- [ ] T071 [US5] Create `client/src/screens/InactivityWarning.tsx` (overlay: reset imminent, Continue, Start new order) and wire the 250 ms ticker's warning/expiry evaluation in `runtime.ts` and `App.tsx`; suspend while `submitted`; resume on unresolved with the R4 formula; emit `interaction_expired`
-- [ ] T072 [US5] In `client/src/machine/runtime.ts`: register `pageshow` and `visibilitychange` listeners calling `revalidate()` synchronously; never register `unload`; `pagehide` only flushes nothing (no queue)
+- [X] T071 [US5] Create `client/src/screens/InactivityWarning.tsx` (overlay: reset imminent, Continue, Start new order) and wire the 250 ms ticker's warning/expiry evaluation in `runtime.ts` and `App.tsx`; suspend while `submitted`; resume on unresolved with the R4 formula; emit `interaction_expired`
+- [X] T072 [US5] In `client/src/machine/runtime.ts`: register `pageshow` and `visibilitychange` listeners calling `revalidate()` synchronously; never register `unload`; `pagehide` only flushes nothing (no queue)
 
 **Checkpoint**: all five P1 stories pass in unit, integration and interface tests. **P1 complete.**
 
@@ -234,12 +234,12 @@ the first remains `failed`.
 ### Tests for User Story 6
 
 - [X] T073 [P] [US6] Integration test `api/test/integration/submit-declined.test.ts`: declined → 201 `failed`, row `failed`, `payment.executed.declined` +1; replay → 200 `failed`; a new key with the same lines → new order
-- [ ] T074 [P] [US6] Reducer tests `client/test/reducer.test.ts` (US6 part): `failed` → declined with cart intact; GO_PAYMENT from declined → new key; after a reload in submitted, `failed` renders the persisted lines
-- [ ] T075 [P] [US6] Interface test `e2e/tests/us6-declined.spec.ts`: Decline → S6 lists the items → Try again with Approve → S5 with a different reference; metrics: declined +1, success +1
+- [X] T074 [P] [US6] Reducer tests `client/test/reducer.test.ts` (US6 part): `failed` → declined with cart intact; GO_PAYMENT from declined → new key; after a reload in submitted, `failed` renders the persisted lines
+- [X] T075 [P] [US6] Interface test `e2e/tests/us6-declined.spec.ts`: Decline → S6 lists the items → Try again with Approve → S5 with a different reference; metrics: declined +1, success +1
 
 ### Implementation for User Story 6
 
-- [ ] T076 [US6] Create `client/src/screens/Declined.tsx` (S6: plain decline copy, items from the frozen submission, Try again → S2 with a new key, Edit order → S1, Start new order) and wire `failed` → declined in `reducer.ts`
+- [X] T076 [US6] Create `client/src/screens/Declined.tsx` (S6: plain decline copy, items from the frozen submission, Try again → S2 with a new key, Edit order → S1, Start new order) and wire `failed` → declined in `reducer.ts`
 
 ---
 
@@ -254,12 +254,12 @@ re-confirm → accepted with the remaining items.
 ### Tests for User Story 7
 
 - [X] T077 [P] [US7] Integration test `api/test/integration/validation.test.ts` (US7 part): unavailable → 422 `item_unavailable` with `affectedItemIds` and `currentItems`; combined with price_mismatch both reasons returned; accepted order replayed after the item became unavailable → served
-- [ ] T078 [P] [US7] Reducer tests `client/test/reducer.test.ts` (US7 part): `item_unavailable` flags the line; GO_REVIEW blocked while flagged; REMOVE_ITEM clears the flag; removing the last flagged line leaves an empty cart and GO_REVIEW stays blocked
-- [ ] T079 [P] [US7] Interface test `e2e/tests/us7-unavailable.spec.ts`: fixture sets `available = false` after the cart is built → Pay → S8 → S1 with the line flagged and Review disabled → remove → review → pay → accepted with the remaining total
+- [X] T078 [P] [US7] Reducer tests `client/test/reducer.test.ts` (US7 part): `item_unavailable` flags the line; GO_REVIEW blocked while flagged; REMOVE_ITEM clears the flag; removing the last flagged line leaves an empty cart and GO_REVIEW stays blocked
+- [X] T079 [P] [US7] Interface test `e2e/tests/us7-unavailable.spec.ts`: fixture sets `available = false` after the cart is built → Pay → S8 → S1 with the line flagged and Review disabled → remove → review → pay → accepted with the remaining total
 
 ### Implementation for User Story 7
 
-- [ ] T080 [US7] In `client/src/screens/Menu.tsx` and `reducer.ts`: flagged-line rendering and the Review guard; S8 "Review again" for `item_unavailable` returns to S1
+- [X] T080 [US7] In `client/src/screens/Menu.tsx` and `reducer.ts`: flagged-line rendering and the Review guard; S8 "Review again" for `item_unavailable` returns to S1
 
 ---
 
@@ -271,12 +271,12 @@ re-confirm → accepted with the remaining items.
 
 ### Tests for User Story 8
 
-- [ ] T081 [P] [US8] Runtime test `client/test/runtime.test.ts` (US8 part): MENU_FAILED → error screen; Try again re-fetches; a failure after PAY never reaches the error screen (classified unknown)
-- [ ] T082 [P] [US8] Interface test `e2e/tests/us8-unreachable.spec.ts`: `route.abort()` on `/api/menu` → S9 → un-route → Try again → S1; reload during the routed outage still renders the app (nginx serves it) and shows S9; `service_unreachable` event delta once the API is reachable
+- [X] T081 [P] [US8] Runtime test `client/test/runtime.test.ts` (US8 part): MENU_FAILED → error screen; Try again re-fetches; a failure after PAY never reaches the error screen (classified unknown)
+- [X] T082 [P] [US8] Interface test `e2e/tests/us8-unreachable.spec.ts`: `route.abort()` on `/api/menu` → S9 → un-route → Try again → S1; reload during the routed outage still renders the app (nginx serves it) and shows S9; `service_unreachable` event delta once the API is reachable
 
 ### Implementation for User Story 8
 
-- [ ] T083 [US8] Create `client/src/screens/Error.tsx` (S9: plain copy, "nothing has been charged" only for pre-submission failures, Try again, Start new order) and wire MENU_FAILED, POST 400 and 503 `reference_exhausted` → S9 in `reducer.ts`; emit `service_unreachable` on the recovery action
+- [X] T083 [US8] Create `client/src/screens/Error.tsx` (S9: plain copy, "nothing has been charged" only for pre-submission failures, Try again, Start new order) and wire MENU_FAILED, POST 400 and 503 `reference_exhausted` → S9 in `reducer.ts`; emit `service_unreachable` on the recovery action
 
 ---
 
@@ -290,24 +290,24 @@ stale `pending` after `paid` → still `paid`; late K1 `paid` after a K2 decline
 
 ### Tests for User Story 9
 
-- [ ] T084 [P] [US9] Reducer tests `client/test/admission.test.ts`: each of the five admission conditions rejects independently (expired interaction; foreign interactionId; foreign idempotencyKey after a decline created K2; illegal transition from confirmed/declined; repeated terminal does not reset `resolvedAt`); S7b → S7a on first pending; discarded responses emit the right event name
-- [ ] T085 [P] [US9] Interface test `e2e/tests/us9-late-responses.spec.ts`: gated `route.fulfill` released after Start new order → new interaction unchanged and `foreign_response_discarded` +1; stale `pending_payment` fulfilled after S5 → S5 unchanged and `stale_response_discarded` +1; K1 `paid` released after a K2 decline → S6 unchanged
+- [X] T084 [P] [US9] Reducer tests `client/test/admission.test.ts`: each of the five admission conditions rejects independently (expired interaction; foreign interactionId; foreign idempotencyKey after a decline created K2; illegal transition from confirmed/declined; repeated terminal does not reset `resolvedAt`); S7b → S7a on first pending; discarded responses emit the right event name
+- [X] T085 [P] [US9] Interface test `e2e/tests/us9-late-responses.spec.ts`: gated `route.fulfill` released after Start new order → new interaction unchanged and `foreign_response_discarded` +1; stale `pending_payment` fulfilled after S5 → S5 unchanged and `stale_response_discarded` +1; K1 `paid` released after a K2 decline → S6 unchanged
 
 ### Implementation for User Story 9
 
-- [ ] T086 [US9] Verify `client/src/machine/reducer.ts` admission rule against `client/test/admission.test.ts`; add `stale_response_discarded` / `foreign_response_discarded` emission in `runtime.ts`
+- [X] T086 [US9] Verify `client/src/machine/reducer.ts` admission rule against `client/test/admission.test.ts`; add `stale_response_discarded` / `foreign_response_discarded` emission in `runtime.ts`
 
 ---
 
 ## Phase 12: Polish & Cross-Cutting Concerns
 
-- [ ] T087 [P] Ops acceptance `e2e/ops/acceptance.spec.ts`: project `webcheckout-accept` with `CLIENT_PORT=8081 DB_PORT=54330`; `down -v` → `up --build --wait` → health `seed: applied` → POST an order → `down` (no -v) → `up --wait` → health `seed: already-present` → order by key still returned → `menu_items` count unchanged; `down -v --remove-orphans` in afterAll
+- [X] T087 [P] Ops acceptance `e2e/ops/acceptance.spec.ts`: project `webcheckout-accept` with `CLIENT_PORT=8081 DB_PORT=54330`; `down -v` → `up --build --wait` → health `seed: applied` → POST an order → `down` (no -v) → `up --wait` → health `seed: already-present` → order by key still returned → `menu_items` count unchanged; `down -v --remove-orphans` in afterAll
 - [X] T088 [P] Integration test `api/test/integration/reference.test.ts`: forced collision via a pre-inserted reference and a stubbed generator → retry produces a distinct reference and `order_reference.collision` +1; five forced collisions → 503 `reference_exhausted`, no row, key reusable
 - [X] T089 [P] Integration test `api/test/integration/health-and-events.test.ts`: `/api/health` 503 when the pool is unreachable; `/api/events` 204 for a valid `text/plain` JSON body, 400 for an unknown name counted as `client_event.rejected`; `/api/metrics` shape with every catalogue key present at 0 on a fresh app
 - [X] T090 Startup log ordering: assert in `api/test/integration/startup.test.ts` that `server.ts`'s boot function (extracted as `boot()` callable without `listen`) logs migrations → seed → simulator before returning, and that a second run logs `seed_applied inserted: 0 updated: 0`
-- [ ] T091 Run `quickstart.md` end to end against the compose stack; fix anything it exposes; record deviations in `PROCESS.md`
-- [ ] T092 Fill `PROCESS.md` sections with what actually happened during implementation: overrides, what the AI got wrong, what changed after implementation started, what was thrown away
-- [ ] T093 Final `npm run typecheck && npm test && npm run test:e2e && npm run test:ops` green; README commands verified on a clean clone (`git clone` into a temp dir, `docker compose up --build`)
+- [X] T091 Run `quickstart.md` end to end against the compose stack; fix anything it exposes; record deviations in `PROCESS.md`
+- [X] T092 Fill `PROCESS.md` sections with what actually happened during implementation: overrides, what the AI got wrong, what changed after implementation started, what was thrown away
+- [X] T093 Final `npm run typecheck && npm test && npm run test:e2e && npm run test:ops` green; README commands verified on a clean clone (`git clone` into a temp dir, `docker compose up --build`)
 
 ---
 
