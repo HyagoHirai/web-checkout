@@ -474,9 +474,11 @@ stays.
 - **FR-029**: A cart abandoned before submission MUST result in no order and no charge.
 - **FR-030**: An order abandoned after submission MUST continue server-side; clearing the screen
   MUST NOT cancel it.
-- **FR-031**: Waiting for a payment result MUST be bounded: a network wait of 8 s for the initial
-  response, followed by polling for the outcome every 2 s for a maximum of 30 s (38 s worst
-  case). The inactivity timer is suspended during the wait and MUST resume when it ends.
+- **FR-031**: Waiting for a payment result MUST be bounded: a network wait of up to 8 s for the
+  initial response, followed by polling for the outcome every 2 s for a maximum of 30 s (38 s
+  worst case; polling starts earlier when the initial request fails or reports a pending
+  outcome, and never runs longer than 30 s). The inactivity timer is suspended during the wait
+  and MUST resume when it ends.
 
 **Late and out-of-order responses**
 
@@ -581,7 +583,8 @@ payment" is verified by observing the simulator's calls, not by counting order r
 - Orders left in pending payment stay there. Resolving them is outside the delivered system; the
   customer's route is the counter.
 - The demonstration runs in Chrome at a 1024×768 viewport (OV-7). Interface tests run against
-  that viewport, and NFR-001's touch-target sizing is judged at it.
+  that viewport, and NFR-001's touch-target sizing is judged at it; the implementation uses a
+  minimum touch target of 64×64 px (plan-level constant, not a rule).
 
 ## Open Values
 
