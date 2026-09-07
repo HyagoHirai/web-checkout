@@ -60,7 +60,7 @@ curl -s localhost:8080/api/metrics | jq .counters
 |---|---|---|
 | Declined (US6) | Selector → Decline → Pay | "Payment declined", items still listed, **Try again** |
 | Unknown outcome, order exists (US4 S7a) | Selector → No answer → Pay | The `202` arrives at once, polling runs 30 s, then "order received, payment not confirmed, reference XXXX, don't pay again" |
-| Unknown outcome, nothing confirmed (US4 S7b) | `docker compose stop api` between Review and Pay, then Pay | Waiting 38 s, then "couldn't confirm whether your order went through, check at the counter"; no reference |
+| Unknown outcome, nothing confirmed (US4 S7b) | `docker compose stop api` between Review and Pay, then Pay | The request is refused at once, so polling starts immediately and runs 30 s; then "couldn't confirm whether your order went through, check at the counter"; no reference |
 | Service unreachable before submission (US8) | `docker compose stop api`, tap Start or reload | "Something went wrong", **Try again** returns to a working kiosk after `docker compose start api` |
 | Price changed so the total differs (US3) | With a cart open: `docker compose exec -T db psql -U checkout -d webcheckout -c "UPDATE menu_items SET price_minor = price_minor + 50 WHERE slug = 'coffee'"` then Pay | Rejected before payment, current prices and total shown, re-confirm accepted at the new total; `orders.validation_rejected.price_mismatch` +1, zero new orders |
 | Item unavailable mid-order (US7) | `UPDATE menu_items SET available = false WHERE slug = 'coffee'` then Pay | Rejected before payment, the line flagged, rest preserved; payment blocked until the line is removed and re-confirmed |
