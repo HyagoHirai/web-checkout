@@ -29,7 +29,9 @@ An interaction begins when the kiosk leaves idle and ends at explicit reset, exp
 ```
 idle ──► building ──► submitted ──┬──► confirmed ──► idle
                                    ├──► declined ──► building (new intent)
-                                   └──► unresolved ──► idle (explicit exit)
+                                   └──► unresolved ──┬──► idle (explicit exit or inactivity)
+                                                     ├──► confirmed  (late definitive result)
+                                                     └──► declined   (late definitive result)
 ```
 
 **building** — cart is editable. A payment-screen key may exist and may be replaced by editing (ADR-002).
@@ -41,6 +43,8 @@ idle ──► building ──► submitted ──┬──► confirmed ──�
 **declined** — a definitive decline was received. Items stay on screen; confirming again creates a new intent, key and order. The declined order stays `failed`.
 
 **unresolved** — the wait and the polling window elapsed without a terminal outcome, or the simulator returned inconclusive. The screen shows a defined exit; the interaction ends when the customer takes it or the inactivity timer fires.
+
+*(Amended 2026-09-07 from clarification, FR-034.)* "Unresolved" is a waiting state, not an outcome. A definitive result for the same intent arriving within the same interaction is applied, moving to confirmed or declined exactly as if it had arrived in time. Presentation remains monotonic per intent: unknown → pending → terminal, never back, and a terminal result is not reapplied. The response is not customer activity: the inactivity deadline already in force is preserved across that transition and never moves backward.
 
 **"Start new order"** from any state ends the interaction. From `submitted` or `unresolved` it is not a retry, does not cancel the submitted order, and does not carry the items into a new payment.
 

@@ -1,0 +1,356 @@
+openapi: 3.1.0
+info:
+  title: Web Checkout API
+  version: 1.0.0
+  description: |
+    Kiosk checkout API. Money is never trusted from the client: the server recomputes every total
+    from its own menu and rejects mismatches (ADR-003). Order submission is idempotent by construction:
+    the client generates the idempotency key, the server binds it to a fingerprint of the intent and
+    returns the recorded outcome on replay (ADR-002). The order row is committed before the simulated
+    payment is attempted (constitution III).
+
+    Every fetch request that belongs to a kiosk interaction carries `X-Interaction-Id`; every response
+    to such a request echoes the request's value as `interactionId` so the client can discard responses
+    that belong to a concluded interaction (ADR-005). Beacons cannot set headers, so `/api/events`
+    carries it in the body.
+
+    Canonical response classification (FR-024; research R10 and contracts/ui-states.md carry the same
+    rule). Never treat the HTTP status family alone as evidence about the intent; only a recognised body
+    is evidence. Four categories:
+      1. Known business outcome: 2xx with a body whose `state` parses. Applied through the client's
+         admission rule.
+      2. Conflict with an existing intent: 409 `intent_mismatch`. An order exists under this key and may
+         be paid; the client looks it up by key and shows the recorded state, never a rejection.
+      3. Request rejected, nothing created, key not consumed: 400 with a recognised body,
+         422 `validation_rejected`, 503 `reference_exhausted`.
+      4. Unknown outcome: everything else — network failure, timeout, 404 on lookup, any status whose
+         body is not recognised, any other 5xx. Never a decline, never permission to pay again.
+
+    All UUID fields are lowercase hyphenated (`^[0-9a-f]{8}-…$`), byte-identical across client, wire
+    and database. Money is integer USD cents. Every API response carries `Cache-Control: no-store` and
+    echoes `x-request-id`.
+servers:
+  - url: http://localhost:8080
+    description: Compose stack (client on :8080 proxies /api to the API)
+
+paths:
+  /api/health:
+    get:
+      summary: Readiness
+      description: 200 only once migrations and seed have completed and the database is reachable.
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, migrations, seed]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  migrations: { type: string, description: Last applied migration version }
+                  seed: { type: string, enum: [applied, already-present] }
+        "503":
+          description: Not ready
+
+  /api/menu:
+    get:
+      summary: Current menu with prices and availability
+      responses:
+        "200":
+          description: Menu
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [currency, items]
+                properties:
+                  currency: { type: string, enum: [USD] }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/MenuItem" }
+
+  /api/orders:
+    post:
+      summary: Submit an order (idempotent)
+      description: |
+        Validates, then inserts the order as `pending_payment`, commits, executes the simulated payment
+        exactly once (only the request whose insert succeeded), records the outcome, and returns it.
+        A replay with the same key and the same intent returns the recorded outcome (or `pending`)
+        without executing anything.
+      parameters:
+        - $ref: "#/components/parameters/InteractionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderSubmission" }
+      responses:
+        "201":
+          description: New order accepted and payment executed by this request with a definitive result. `state` is `paid` or `failed`. A decline is a 201, not a 4xx.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderStatus" }
+        "202":
+          description: |
+            Order recorded, payment outcome not known. Either this request executed the simulator and it was
+            inconclusive (`replay` false), or a replay found the order still `pending_payment` (`replay` true).
+            `state` is `pending_payment`. Nothing further executes; poll by key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderStatus" }
+        "200":
+          description: Replay of a known key with a matching fingerprint and a recorded definitive outcome (`paid` or `failed`). Nothing executed; not re-validated against the menu.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderStatus" }
+        "400":
+          description: Malformed request (schema violation, bad UUID, missing header). No order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Known key with a different intent (fingerprint mismatch). No new row; an order exists under this key and may be paid; it is untouched (ADR-002). The client looks it up by key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IntentMismatch" }
+        "422":
+          description: Validation rejected before payment. No order, nothing pending (ADR-003 "Rejection is not failure").
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationRejection" }
+        "503":
+          description: |
+            Only with body `error: reference_exhausted` — five attempts to generate a unique 4-character reference all collided
+            (P ≈ 1.5e-10 at 10k orders). No row was inserted and the key is not consumed; the client shows "could not place
+            your order, try again". Any other 503 body is treated as unknown.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          description: Unexpected failure, including an exception after the order was committed. The client MUST treat this as an unknown outcome (FR-024); the order may or may not exist, and if it exists it is `pending_payment`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/orders/by-key/{idempotencyKey}:
+    get:
+      summary: Status lookup by idempotency key
+      description: |
+        The recovery path after a lost response (ADR-002 "Recovery when the client loses state"). Lookup
+        is by key only; a reference never resolves to an order. `404` means "not recorded yet or never
+        recorded" and MUST be treated as unknown, not as failure.
+      parameters:
+        - $ref: "#/components/parameters/InteractionId"
+        - name: idempotencyKey
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Uuid" }
+      responses:
+        "200":
+          description: Known order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderStatus" }
+        "404":
+          description: No order recorded for this key
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/events:
+    post:
+      summary: Best-effort client telemetry
+      description: |
+        Fire-and-forget, one event per request. Sent with `navigator.sendBeacon` as a string body, which the browser
+        transmits as `text/plain;charset=UTF-8` (no preflight); the server parses that as JSON. Logged as a structured
+        `client.event_received` line and counted as `client_event.<name>`. The client never reads the reply. Loss is
+        acceptable (constitution VI); no queue exists.
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { $ref: "#/components/schemas/ClientEvent" }
+          application/json:
+            schema: { $ref: "#/components/schemas/ClientEvent" }
+      responses:
+        "204": { description: Recorded }
+        "400": { description: Malformed body or unknown event name. Counted as `client_event.rejected`. }
+
+  /api/metrics:
+    get:
+      summary: Simple counters
+      description: In-process counters as JSON. No metrics backend (constitution VI). Used by tests to observe simulator executions.
+      responses:
+        "200":
+          description: Counters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  startedAt: { type: string, format: date-time }
+                  uptimeSeconds: { type: integer }
+                  counters:
+                    type: object
+                    additionalProperties: { type: integer }
+                    description: Every key pre-registered at 0 so the shape is stable. Full catalogue in research.md R13.
+                example:
+                  startedAt: "2026-09-07T18:00:00.000Z"
+                  uptimeSeconds: 512
+                  counters:
+                    orders.accepted: 12
+                    orders.replayed.paid: 3
+                    orders.replayed.pending_payment: 1
+                    orders.validation_rejected.price_mismatch: 1
+                    orders.intent_mismatch: 0
+                    payment.executed.success: 10
+                    payment.executed.declined: 1
+                    payment.executed.inconclusive: 1
+                    payment.outcome_record_failed: 0
+                    payment.post_commit_exception: 0
+                    order_reference.collision: 0
+                    status_lookup.not_found: 2
+                    client_event.unresolved_shown: 1
+
+components:
+  parameters:
+    InteractionId:
+      name: X-Interaction-Id
+      in: header
+      required: true
+      schema: { $ref: "#/components/schemas/Uuid" }
+      description: The kiosk interaction this request belongs to. Echoed verbatim in the response body. Stored on the order at acceptance for log correlation; not a lookup credential (the key is).
+
+  schemas:
+    Uuid:
+      type: string
+      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      description: Lowercase hyphenated UUID. Validated by pattern rather than the ajv-formats uuid format, which admits mixed case and urn prefixes.
+
+    MenuItem:
+      type: object
+      required: [id, name, priceMinor, currency, available]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        name: { type: string }
+        priceMinor: { type: integer, minimum: 1, description: USD cents }
+        currency: { type: string, enum: [USD] }
+        available: { type: boolean }
+
+    OrderLine:
+      type: object
+      required: [itemId, quantity]
+      properties:
+        itemId: { $ref: "#/components/schemas/Uuid" }
+        quantity: { type: integer, minimum: 1, maximum: 10 }
+
+    OrderSubmission:
+      type: object
+      required: [idempotencyKey, currency, expectedTotalMinor, lines]
+      additionalProperties: false
+      properties:
+        idempotencyKey:
+          allOf: [{ $ref: "#/components/schemas/Uuid" }]
+          description: Client-generated identity of this purchase decision. Frozen from first send until the outcome is known.
+        currency: { type: string, enum: [USD] }
+        expectedTotalMinor:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          description: The total the client displayed, in cents. The server recomputes and rejects a mismatch. No unit prices are sent.
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: "#/components/schemas/OrderLine" }
+          description: Distinct itemIds (duplicates are rejected). Sum of quantities at most 50 (checked in code; JSON Schema cannot sum).
+        simulation:
+          type: object
+          additionalProperties: false
+          required: [outcome]
+          description: |
+            Simulator-only instruction chosen on the simulated payment screen. Validated before any database access;
+            never part of the fingerprint; never stored; read only by the request that inserted the order; ignored on
+            replay; ignored entirely when the server runs with SIMULATOR_CLIENT_HINT=ignore (then the server default
+            applies). A real provider adapter would reject the field. See research.md R9.
+          properties:
+            outcome: { type: string, enum: [success, declined, inconclusive] }
+
+    OrderStatus:
+      type: object
+      required: [orderId, reference, state, totalMinor, currency, interactionId, replay]
+      properties:
+        orderId: { $ref: "#/components/schemas/Uuid" }
+        reference:
+          type: string
+          pattern: "^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$"
+          description: Counter reference. 4 characters, no look-alikes.
+        state: { type: string, enum: [pending_payment, paid, failed] }
+        totalMinor: { type: integer }
+        currency: { type: string, enum: [USD] }
+        interactionId: { allOf: [{ $ref: "#/components/schemas/Uuid" }], description: Echo of the request's X-Interaction-Id }
+        replay: { type: boolean, description: true when served from the recorded state without executing anything }
+
+    ValidationRejection:
+      type: object
+      required: [error, reasons, interactionId]
+      description: All reasons are returned together so the client can flag items and refresh prices in one round trip.
+      properties:
+        error: { type: string, enum: [validation_rejected] }
+        reasons:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [price_mismatch, item_unavailable, unknown_item, duplicate_item, empty_cart, quantity_out_of_bounds, units_out_of_bounds, total_out_of_bounds, currency_unsupported]
+        interactionId: { $ref: "#/components/schemas/Uuid" }
+        currentTotalMinor:
+          type: integer
+          description: Present for price_mismatch. The server's total for the same lines at current prices.
+        currentItems:
+          type: array
+          description: Present for price_mismatch, item_unavailable and unknown_item. Current price and availability of each affected item (an unknown item is omitted).
+          items: { $ref: "#/components/schemas/MenuItem" }
+        affectedItemIds:
+          type: array
+          items: { $ref: "#/components/schemas/Uuid" }
+          description: Every itemId that contributed to a reason, so the client can flag lines.
+
+    IntentMismatch:
+      type: object
+      required: [error, interactionId]
+      properties:
+        error: { type: string, enum: [intent_mismatch] }
+        interactionId: { $ref: "#/components/schemas/Uuid" }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, description: "A stable code such as not_found, bad_request, reference_exhausted, internal" }
+        requestId: { type: string }
+        interactionId: { $ref: "#/components/schemas/Uuid" }
+
+    ClientEvent:
+      type: object
+      additionalProperties: false
+      required: [interactionId, name, at]
+      properties:
+        interactionId: { $ref: "#/components/schemas/Uuid" }
+        idempotencyKey: { $ref: "#/components/schemas/Uuid" }
+        name:
+          type: string
+          enum:
+            - unresolved_shown
+            - late_result_applied
+            - stale_response_discarded
+            - foreign_response_discarded
+            - interaction_expired
+            - service_unreachable
+            - rejection_shown
+        at: { type: integer, description: Client epoch ms }
+        detail:
+          type: object
+          additionalProperties: { type: [string, integer, boolean] }
+          maxProperties: 8

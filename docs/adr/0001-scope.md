@@ -45,6 +45,8 @@ Payment is simulated with a defined contract. It produces exactly three outcomes
 
 The simulator's configured outcome applies to *new* executions only. Changing it never alters a recorded outcome, and a replay of a declined order does not become a success because the configuration changed.
 
+In simulation the requested outcome is selected per submission on the simulated payment screen, with a server default when none is sent. It is not money: it is excluded from the intent fingerprint, never stored on the order, read only by the request that inserted the order, and ignored on every replay. A real provider adapter would reject the field. *(Amended 2026-09-07, plan review; approved by the owner.)*
+
 **The payment screen is explicitly simulated.** It says so on screen. It collects the minimum interaction needed to demonstrate the flow — a confirm action — and **no card number, expiry, or CVV fields**, functional or decorative. No provider credentials are required to run the application.
 
 ## Observability, bounded
