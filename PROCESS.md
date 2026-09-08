@@ -236,6 +236,15 @@ control that actually starts the operation. Five test selectors changed to match
 changes (four for the new label, one because the unavailable card no longer has an Add control to
 assert as disabled; it now asserts that no Add control exists). No behavioural assertion moved.
 
+A second, smaller pass fixed containment rather than layout: a grid item's default minimum width
+is its content, so the "+ Add" button could force a card wider than its column, clipping the button
+and truncating names, with a horizontal scrollbar below the target width and, with a longer name
+or another system font, potentially at it. Cards now shrink below their content, names wrap, the
+price/Add row wraps the button under the price when there is no room, and the page never scrolls
+horizontally. "Remove" was also moved onto the price's right edge (its own padding had inset it),
+away from the "+" the finger is already working. Checked at 1024×768 before and after: nothing else
+shifted; no test selector changed.
+
 Scope note: a production kiosk would show product photography, since that is what drives
 selection. It is omitted here as asset work rather than engineering, and outside what the brief
 asks for.

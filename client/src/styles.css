@@ -42,7 +42,7 @@ button.secondary[aria-pressed="true"] { border-color: var(--ink); color: var(--i
 .screen { height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 28px; border-bottom: 1px solid var(--line); background: var(--panel); min-height: 80px; }
 .topbar h1 { margin: 0; font-size: 26px; }
-.content { padding: 24px 28px; overflow: auto; min-height: 0; }
+.content { padding: 24px 28px; overflow-y: auto; overflow-x: hidden; min-height: 0; min-width: 0; }
 .content.center { display: grid; place-items: center; }
 .actions { display: flex; gap: 16px; align-items: center; padding: 16px 28px; border-top: 1px solid var(--line); background: var(--panel); min-height: 104px; }
 .actions .spacer { flex: 1; }
@@ -55,31 +55,34 @@ button.secondary[aria-pressed="true"] { border-color: var(--ink); color: var(--i
 .idle .primary { min-width: 400px; min-height: 96px; font-size: 32px; justify-self: center; }
 
 /* Menu: the list scrolls; the order panel stays put with the total and the action together. */
-.menu-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; height: 100%; min-height: 0; }
-.menu-scroll { overflow: auto; min-height: 0; padding-right: 4px; }
+.menu-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; height: 100%; min-height: 0; min-width: 0; }
+.menu-scroll { overflow-y: auto; overflow-x: hidden; min-height: 0; min-width: 0; padding-right: 4px; }
 .menu { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; grid-auto-rows: 1fr; }
 .menu.unavailable-list { margin-top: 14px; grid-auto-rows: auto; }
-.item { display: grid; grid-template-rows: 1fr auto; gap: 10px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); min-height: 148px; }
-.item .name { font-weight: 600; line-height: 1.25; align-self: start; }
-.item .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* Cards never grow past their column: min-width 0 lets a grid item shrink below its content, names wrap,
+   and the price/Add row wraps the button under the price when there is no room. Nothing is positioned. */
+.item { display: grid; grid-template-rows: 1fr auto; gap: 10px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); min-height: 148px; min-width: 0; }
+.item .name { font-weight: 600; line-height: 1.25; align-self: start; overflow-wrap: anywhere; min-width: 0; }
+.item .row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; min-width: 0; }
+.item .row button { flex: 0 0 auto; margin-left: auto; }
 .item .price { color: var(--muted); font-size: 22px; }
 .item.unavailable { opacity: 0.6; min-height: 0; grid-template-rows: auto auto; gap: 6px; }
 .item.unavailable .price { font-size: 18px; }
 .badge { display: inline-block; font-size: 15px; padding: 3px 10px; border-radius: 999px; background: #eee6da; color: var(--muted); }
 .badge.flag { background: #fbe3e3; color: var(--bad); }
-.cart { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; }
+.cart { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
 .cart h2 { margin: 0 0 8px; font-size: 22px; }
 .cart-lines { overflow: auto; min-height: 0; }
 .line { padding: 10px 0; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
 .line.flagged { background: #fff3f3; border-radius: 8px; padding-left: 8px; padding-right: 8px; }
 .line .line-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
-.line .line-name { font-weight: 600; }
+.line .line-name { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
 .line .line-price { color: var(--muted); white-space: nowrap; }
 .line .line-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .qty { display: inline-flex; align-items: center; gap: 8px; }
 .qty button { width: var(--tap); height: var(--tap); padding: 0; font-size: 28px; line-height: 1; }
 .qty span { min-width: 36px; text-align: center; font-weight: 700; font-size: 22px; }
-button.remove { font-size: 16px; font-weight: 500; color: var(--muted); border-color: transparent; background: transparent; padding: 0 12px; min-height: var(--tap); }
+button.remove { font-size: 16px; font-weight: 500; color: var(--muted); border-color: transparent; background: transparent; padding: 0 0 0 20px; min-height: var(--tap); min-width: 76px; text-align: right; }
 .cart-foot { border-top: 2px solid var(--line); padding-top: 12px; display: grid; gap: 10px; }
 .total { display: flex; justify-content: space-between; font-size: 26px; font-weight: 700; }
 .cart-foot .primary { width: 100%; }
