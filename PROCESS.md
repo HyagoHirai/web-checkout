@@ -123,6 +123,27 @@ Specific, because the point is what had to be noticed.
   never be re-sent), softens the copy to "this attempt was not accepted", and performs one lookup of
   the kept key when the customer confirms again, before a new key exists. That narrows the window
   from milliseconds to the customer's reaction time without coordination. It is still not a proof.
+- **The last check released a new key on any answer that was not an outcome.** Round four's fix
+  looked the rejected key up once more before a new intent, but treated a network failure, a 5xx
+  and an unrecognised body the same as "not found" and let the customer pay again, contradicting
+  FR-024. A fifth review reproduced the double payment against a real Postgres with a controlled
+  transport failure. Categories are now handled explicitly: a recorded outcome is applied; only a
+  `404` on that check permits a new intent (the one exception, made explicit in the contract,
+  because FR-009's re-confirmation must be possible and the owner ruled out per-intent
+  coordination); anything else keeps the key, shows "we could not check your previous attempt",
+  and lets the customer retry.
+- **The kept-key rule kept declined keys too.** "Edit order" after a decline carried the failed key
+  into editing; confirming again looked it up, found `failed`, and showed the old decline instead of
+  a new payment. A key is now kept only while its outcome is unknown; a decline is terminal for that
+  order and editing after it starts a new intent.
+- **Polling followed the phase, not the key.** A restored document that adopted another attempt of
+  the same interaction (K2 for K1) kept polling K1 and never started K2. Polling is now bound to the
+  interaction/key pair and reconciled on every transition.
+- **A check's continuation ignored where the customer had gone.** Two taps on Continue started two
+  checks; the second, completing after the customer had gone back and edited the cart, opened the
+  payment screen with a third key and no review. Now one check runs at a time, the control is
+  disabled meanwhile, and a continuation is admitted only if the review screen it started from is
+  still current and the kept key is the same object.
 - **Bounds were checked on quantity changes only.** A re-pricing after a rejection could push a
   valid cart over $1,000.00 and the client would still freeze and send it (the server refused it).
   `canReview` now validates the whole cart.
@@ -222,6 +243,13 @@ volume path that the verifier had already corrected; three incompatible test-run
 incompatible TypeScript execution models; `format: uuid` in the contract versus a strict pattern in
 the research; the interaction id in the body in one document and in a header in another. All
 refinements, resolved by reconciliation.
+
+**Round five** (the same external agent, on commit `1a5114e`) found two high and two medium
+defects in the runtime, all reproduced: the last check releasing a new key on a transport failure;
+declined keys kept into editing; polling not following the key on a restored document; an
+abandoned check's continuation navigating. All four fixed with runtime and browser regressions.
+The `404` exception in the last check is now an explicit, documented rule in the contract, the UI
+contract and the research, rather than a divergence between them.
 
 **Round four** (the same external agent, on commit `122aade`) found one critical, one high and two
 medium defects, all reproduced: the bfcache restore of an ended interaction; a rejection treated as

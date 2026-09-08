@@ -75,7 +75,7 @@ export function createApi(fetchImpl: Fetch = (...a) => fetch(...a)) {
     async lookupByKey(key: string, interactionId: string, signal?: AbortSignal): Promise<Classified> {
       try {
         const res = await fetchImpl(`/api/orders/by-key/${key}`, { headers: { accept: 'application/json', [INTERACTION_HEADER]: interactionId }, signal });
-        if (res.status === 404) return { category: 'unknown', reason: 'not found' };
+        if (res.status === 404) return { category: 'unknown', reason: 'not found', notFound: true };
         return await classify(res);
       } catch (e) {
         return { category: 'unknown', reason: `network: ${(e as Error).message}` };

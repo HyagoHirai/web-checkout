@@ -22,3 +22,27 @@ test('US6: a decline keeps the items; trying again is a new order; the first sta
   expect(delta(before, after, 'payment.executed.success')).toBe(1);
   expect(delta(before, after, 'orders.accepted')).toBe(2);
 });
+
+test('finding 2 (round five): Edit order after a decline, then re-confirm, is a new intent with the edited items; the first stays failed', async ({ page }) => {
+  const before = await metrics(page);
+  await page.goto('/');
+  await startAndAdd(page, [{ name: 'Coffee', times: 1 }]);
+  await goToPayment(page);
+  await choose(page, 'declined');
+  await pay(page);
+  await expect(page.locator('[data-screen="declined"]')).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: 'Edit order' }).tap();
+  await expect(page.locator('[data-screen="menu"]')).toBeVisible();
+  await page.getByRole('button', { name: 'Add Latte' }).tap();
+  await expect(page.locator('[data-total]')).toHaveText('$8.25');
+  await goToPayment(page);
+  await expect(page.locator('[data-screen="payment"] [data-total]')).toHaveText('$8.25');
+  await choose(page, 'success');
+  await pay(page);
+  await expect(page.locator('[data-screen="confirmed"]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Payment confirmed, $8.25')).toBeVisible();
+  const after = await metrics(page);
+  expect(delta(before, after, 'payment.executed.declined')).toBe(1);
+  expect(delta(before, after, 'payment.executed.success')).toBe(1);
+  expect(delta(before, after, 'orders.accepted')).toBe(2);
+});

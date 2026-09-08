@@ -4,6 +4,7 @@ const COPY: Record<ErrorInfo['kind'], { title: string; body: string }> = {
   menu_unreachable: { title: 'Something went wrong', body: 'We could not reach the ordering service. Nothing has been charged.' },
   bad_request: { title: 'We could not place your order', body: 'Something went wrong with the request. Nothing has been charged. Please try again.' },
   reference_exhausted: { title: 'We could not place your order', body: 'The system could not issue an order reference. Nothing has been charged. Please try again.' },
+  lookup_failed: { title: 'We could not check your previous attempt', body: 'The ordering service did not answer. Nothing new has been started. Please try again in a moment.' },
 };
 
 export function ErrorScreen({ error, onTryAgain, onStartNew }: { error: ErrorInfo; onTryAgain: () => void; onStartNew: () => void }) {

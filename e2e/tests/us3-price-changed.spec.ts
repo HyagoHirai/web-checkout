@@ -80,3 +80,35 @@ test('finding 2: after a rejection, confirming again first checks the rejected k
   expect(delta(before, after, 'orders.accepted')).toBe(1);
   expect(delta(before, after, 'payment.executed.success')).toBe(1);
 });
+
+test('finding 1 (round five): when the last check of a rejected key fails, no new payment is offered; a retry that finds the order shows it', async ({ page }) => {
+  const before = await metrics(page);
+  await page.goto('/');
+  await startAndAdd(page, [{ name: 'Coffee', times: 2 }]);
+  await goToPayment(page);
+  await page.route('**/api/orders', async (route) => {
+    const res = await route.fetch(); // the server accepts and pays K1 ($7.00)
+    await res.json();
+    await route.fulfill({ status: 422, json: { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: 'x', currentTotalMinor: 800, currentItems: [], affectedItemIds: [] } });
+  }, { times: 1 });
+  await choose(page, 'success');
+  await pay(page);
+  await expect(page.locator('[data-screen="rejected"]')).toBeVisible();
+  await page.locator('[data-action="review-again"]').tap();
+  await expect(page.locator('[data-screen="review"]')).toBeVisible();
+  // the last check cannot reach the service
+  await page.route('**/api/orders/by-key/**', (route) => route.abort('connectionrefused'), { times: 1 });
+  await page.getByRole('button', { name: 'Continue to payment' }).tap();
+  await expect(page.locator('[data-screen="error"]')).toBeVisible();
+  await expect(page.getByText('We could not check your previous attempt')).toBeVisible();
+  await expect(page.locator('[data-screen="payment"]')).toHaveCount(0);
+  // the service is back: the retry finds the paid order
+  await page.locator('[data-action="try-again"]').tap();
+  await expect(page.locator('[data-screen="review"]')).toBeVisible();
+  await page.getByRole('button', { name: 'Continue to payment' }).tap();
+  await expect(page.locator('[data-screen="confirmed"]')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Payment confirmed, $7.00')).toBeVisible();
+  const after = await metrics(page);
+  expect(delta(before, after, 'orders.accepted')).toBe(1);
+  expect(delta(before, after, 'payment.executed.success')).toBe(1);
+});

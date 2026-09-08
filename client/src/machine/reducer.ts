@@ -10,6 +10,7 @@ export const initialState: State = {
   cart: { lines: [], flagged: [] },
   rejection: null,
   error: null,
+  checkingKey: false,
   now: 0,
 };
 
@@ -61,9 +62,13 @@ export function canReview(cart: Cart, menu: MenuItem[] | null): boolean {
   return cartBlocker(cart, menu) === null;
 }
 
-/** A submission that was sent and rejected is kept until a new intent replaces it (ADR-002 "The validation window"). */
+/**
+ * A submission that was sent and rejected, with NO known outcome, is kept until a new intent replaces
+ * it (ADR-002 "The validation window"). A key whose outcome is known (a decline is terminal for that
+ * order, ADR-005) is never kept: editing after a decline starts a new intent.
+ */
 function keptIntent(i: Interaction): Submission | null {
-  return i.submission && i.submission.sentAt !== null ? i.submission : null;
+  return i.submission && i.submission.sentAt !== null && i.submission.knownState === 'none' ? i.submission : null;
 }
 
 function setLine(cart: Cart, itemId: string, quantity: number): Cart {
@@ -97,6 +102,11 @@ function stamp(i: Interaction, now: number): Interaction {
 
 function toIdle(state: State, now: number): State {
   return { ...initialState, now, menu: state.menu };
+}
+
+/** A rejected key's last check is admitted only while the screen it was started from is still current. */
+function checkStillCurrent(i: Interaction): boolean {
+  return i.phase === 'building' && i.screen === 'review' && keptIntent(i) !== null;
 }
 
 const DEFINITENESS: Record<KnownState, number> = { none: 0, pending: 1, paid: 2, failed: 2 };
@@ -237,6 +247,19 @@ export function reduce(state: State, ev: Event): State {
 
   if (!i) return state;
   if (isExpired(i, now)) return toIdle(state, now);
+
+  // The last check of a kept key: one at a time, from the review screen only.
+  if (ev.type === 'CHECK_START') {
+    if (state.checkingKey || !checkStillCurrent(i)) return state;
+    return { ...state, now, checkingKey: true };
+  }
+  if (ev.type === 'CHECK_END') return state.checkingKey ? { ...state, now, checkingKey: false } : state;
+  if (ev.type === 'CHECK_FAILED') {
+    // transport failure, 5xx or an unrecognised body: nothing is known, nothing new is started (FR-024)
+    if (!checkStillCurrent(i)) return { ...state, now, checkingKey: false };
+    return { ...state, now, checkingKey: false, error: { kind: 'lookup_failed' }, interaction: { ...i, screen: 'error' } };
+  }
+
   const active = ACTIVITY.has(ev.type) ? stamp(i, now) : i;
 
   switch (ev.type) {

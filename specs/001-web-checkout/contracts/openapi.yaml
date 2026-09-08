@@ -27,6 +27,12 @@ info:
          looks it up once more before creating a new intent; only then is the key discarded.
       4. Unknown outcome: everything else — network failure, timeout, 404 on lookup, any status whose
          body is not recognised, any other 5xx. Never a decline, never permission to pay again.
+      One explicit exception, decided so that FR-009's re-confirmation after a rejection is possible at all:
+      when the customer confirms again after a 422, the client checks the kept key once more, and a 404 on
+      THAT check permits a new intent. A 404 there does not prove absence of effects (ADR-002 "The
+      validation window"); it is the only signal available without per-intent coordination, which the
+      owner ruled out. Any other failure of that check (network, 5xx, unrecognised body) keeps the key and
+      permits nothing: the customer is told the check could not be made and may retry.
 
     All UUID fields are lowercase hyphenated (`^[0-9a-f]{8}-…$`), byte-identical across client, wire
     and database. Money is integer USD cents. Every API response carries `Cache-Control: no-store` and

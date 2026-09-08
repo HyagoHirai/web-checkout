@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrderStatus } from '../../shared/wire.ts';
 import { createApi } from '../src/api/client.ts';
 import { createRuntime, type Runtime } from '../src/machine/runtime.ts';
-import { COFFEE, IID, K1, K2, MENU } from './helpers.ts';
+import { COFFEE, IID, K1, K2, LATTE, MENU } from './helpers.ts';
 
 type Handler = (url: string, init?: RequestInit) => Promise<Response> | Response;
 
@@ -364,5 +364,108 @@ describe('review round four: stale documents and the last check before a new int
     expect(ff.posts()).toHaveLength(2);
     expect(ff.posts()[1].body).toMatchObject({ idempotencyKey: K2, expectedTotalMinor: 800 });
     expect(rt.getState().interaction?.phase).toBe('confirmed');
+  });
+});
+
+describe('review round five: the last check, declined keys, polling ownership, abandoned continuations', () => {
+  const rejected422 = () => json(422, { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: IID, currentTotalMinor: 800, currentItems: [{ ...COFFEE, priceMinor: 400 }], affectedItemIds: [COFFEE.id] });
+
+  async function rejectedThenReview() {
+    ff.setPost(rejected422);
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('rejected');
+    ff.setMenu(MENU.map((m) => (m.id === COFFEE.id ? { ...m, priceMinor: 400 } : m)));
+    rt.actions.tryAgain();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('review');
+  }
+
+  it.each([
+    ['network failure', () => Promise.reject(new TypeError('Failed to fetch'))],
+    ['500', () => json(500, { error: 'internal' })],
+    ['unrecognised body', () => json(200, { hello: 'world' })],
+  ] as const)('finding 1: when the last check fails (%s) no new key is created; the kept key stays and the customer can retry', async (_n, handler) => {
+    await rejectedThenReview();
+    ff.setGet(handler as Handler);
+    rt.actions.goPayment();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('error');
+    expect(rt.getState().error?.kind).toBe('lookup_failed');
+    expect(rt.getState().interaction?.submission?.idempotencyKey).toBe(K1);
+    expect(ff.posts()).toHaveLength(1);
+    // the network is back and the concurrent request had paid K1 meanwhile: the retry finds it
+    ff.setGet(() => json(200, orderStatus('paid', IID, { totalMinor: 700, replay: true })));
+    rt.actions.retryAfterError();
+    expect(rt.getState().interaction?.screen).toBe('review');
+    rt.actions.goPayment();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.phase).toBe('confirmed');
+    expect(ff.posts()).toHaveLength(1);
+  });
+
+  it('finding 2: Edit order after a decline discards the declined key; re-confirming is a new intent with the edited items', async () => {
+    ff.setPost(() => json(201, orderStatus('failed')));
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.phase).toBe('declined');
+    rt.actions.goMenu();
+    expect(rt.getState().interaction?.submission).toBeNull();
+    rt.actions.addItem(LATTE.id);
+    rt.actions.goReview();
+    ff.setPost(() => json(201, orderStatus('paid', IID, { totalMinor: 1175 })));
+    rt.actions.goPayment();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('payment');
+    expect(rt.getState().interaction?.submission?.idempotencyKey).toBe(K2);
+    expect(ff.gets()).toHaveLength(0); // nothing to check: a decline is terminal for that order
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(ff.posts()).toHaveLength(2);
+    expect(ff.posts()[1].body).toMatchObject({ idempotencyKey: K2, expectedTotalMinor: 1175, lines: [{ itemId: COFFEE.id, quantity: 2 }, { itemId: LATTE.id, quantity: 1 }] });
+    expect(rt.getState().interaction?.phase).toBe('confirmed');
+  });
+
+  it('finding 3: adopting another attempt of the same interaction moves polling to the new key without a POST', async () => {
+    ff.setPost(() => new Promise<Response>(() => {}));
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(8_300); // polling K1
+    expect(ff.gets().every((g) => g.url.endsWith(K1))).toBe(true);
+    const k1Polls = ff.gets().length;
+    // another document in this tab followed K1's decline and sent K2; it is now the tab's record
+    const rec = rt.getState().interaction!;
+    const k2 = { ...rec, submission: { ...rec.submission!, idempotencyKey: K2, sentAt: Date.now(), pollStartedAt: Date.now() } };
+    sessionStorage.setItem('webcheckout.interaction', JSON.stringify(k2));
+    window.dispatchEvent(new Event('pageshow'));
+    expect(rt.getState().interaction?.submission?.idempotencyKey).toBe(K2);
+    await vi.advanceTimersByTimeAsync(2_300);
+    const k2Polls = ff.gets().filter((g) => g.url.endsWith(K2)).length;
+    expect(k2Polls).toBeGreaterThanOrEqual(1);
+    expect(ff.gets().filter((g) => g.url.endsWith(K1)).length).toBe(k1Polls); // K1 polling stopped
+    expect(ff.posts()).toHaveLength(1);
+  });
+
+  it('finding 4: only one check runs at a time, and a check whose screen was left navigates nowhere', async () => {
+    await rejectedThenReview();
+    const releases: (() => void)[] = [];
+    ff.setGet(() => new Promise<Response>((r) => { releases.push(() => r(json(404, { error: 'not_found' }))); }));
+    rt.actions.goPayment();
+    rt.actions.goPayment();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(releases).toHaveLength(1); // the second tap did not start a second check
+    expect(rt.getState().checkingKey).toBe(true);
+    // the customer leaves the review while the check is in flight and edits the cart
+    rt.actions.goMenu();
+    rt.actions.addItem(LATTE.id);
+    expect(rt.getState().interaction?.screen).toBe('menu');
+    releases[0]();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().checkingKey).toBe(false);
+    expect(rt.getState().interaction?.screen).toBe('menu'); // no navigation, no new key
+    expect(rt.getState().interaction?.submission?.idempotencyKey).toBe(K1);
+    expect(rt.getState().cart.lines).toHaveLength(2);
   });
 });

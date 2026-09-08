@@ -176,6 +176,10 @@ operation within its own interaction is explicitly permitted (constitution IV).
 5. A terminal result is not reapplied: receiving `paid` again in `confirmed` does not reset
    `resolvedAt` or restart the 15 s display; receiving `failed` again in `declined` is a no-op.
 
+**Polling follows the key** (review round five): the polling loop is bound to the interaction/key
+pair it was started for. When a restored document adopts another attempt of the same interaction
+(K2 replacing K1), the K1 loop is stopped and a K2 loop starts; the POST is never re-sent.
+
 **Stale documents** (review round four): a document restored from the back/forward cache keeps
 its heap. If another document in the same tab has since moved on (reset, a new interaction, a new
 attempt under the same interaction), the restored document's memory is stale. On `pageshow` and
@@ -455,14 +459,19 @@ submission). If it arrives it is handled per the table above: lookup by key, sho
 state with the **recorded** total, never this attempt's. It is a conflict with an existing intent,
 not a rejection. **400** on POST (nothing created, key not consumed) → S9 with "try again".
 
-**A rejected key is kept until a new intent replaces it** (review round four). A 422 means this
-request created nothing; it is not evidence that no concurrent request with the same key can be
-accepted (ADR-002 "The validation window"). The client keeps the key (it can never be re-sent:
-`sentAt` is set), lets the customer edit and re-confirm, and when they confirm again performs one
-lookup of the kept key before generating a new one. Found → the recorded state is applied; not
-found → a new key. This narrows the window from the winner's commit latency to the customer's
-reaction time without any per-intent coordination, which the owner ruled out. It is still not a
-proof, and the ADR says so.
+**A rejected key is kept until a new intent replaces it** (review rounds four and five). A 422
+means this request created nothing; it is not evidence that no concurrent request with the same
+key can be accepted (ADR-002 "The validation window"). The client keeps the key **only while its
+outcome is unknown** (`knownState` none; a declined key is terminal for that order and is never
+kept, so editing after a decline starts a new intent). It can never be re-sent (`sentAt` is set).
+When the customer confirms again, one check of the kept key runs, one at a time, from the review
+screen, and its continuation is admitted only if that screen is still current. Categories are
+handled explicitly: a recorded outcome is applied; a `404` on that check is the one case where
+"not found" permits a new intent, because otherwise FR-009's re-confirmation could never happen
+and the owner ruled out per-intent coordination; anything else (network failure, 5xx, an
+unrecognised body) keeps the key and permits nothing, and the customer is told the check could not
+be made and may retry (FR-024). This narrows the window from the winner's commit latency to the
+customer's reaction time. It is still not a proof, and the ADR says so.
 
 **Menu refresh policy**: `GET /api/menu` on Start and on leaving S8. The cart is re-priced from
 that fetch; the review total and `expectedTotalMinor` are one derived value from one cart state

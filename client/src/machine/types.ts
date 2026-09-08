@@ -44,7 +44,7 @@ export interface Rejection {
 }
 
 export interface ErrorInfo {
-  kind: 'menu_unreachable' | 'bad_request' | 'reference_exhausted';
+  kind: 'menu_unreachable' | 'bad_request' | 'reference_exhausted' | 'lookup_failed';
 }
 
 export const INTERACTION_FORMAT_VERSION = 1;
@@ -69,6 +69,8 @@ export interface State {
   cart: Cart;
   rejection: Rejection | null;
   error: ErrorInfo | null;
+  /** A last check of a kept key is in flight (one at a time); the review's Continue is disabled meanwhile. */
+  checkingKey: boolean;
   now: number;
 }
 
@@ -79,7 +81,7 @@ export type Classified =
   | { category: 'rejected'; rejection: ValidationRejection }
   | { category: 'bad_request' }
   | { category: 'reference_exhausted' }
-  | { category: 'unknown'; reason: string };
+  | { category: 'unknown'; reason: string; notFound?: boolean };
 
 export type Event =
   | { type: 'START'; now: number; interactionId: string }
@@ -98,6 +100,9 @@ export type Event =
   | { type: 'RESPONSE'; now: number; source: 'post' | 'poll' | 'lookup'; interactionId: string; idempotencyKey: string; result: Classified }
   | { type: 'TICK'; now: number }
   | { type: 'CONTINUE'; now: number }
+  | { type: 'CHECK_START'; now: number }
+  | { type: 'CHECK_END'; now: number }
+  | { type: 'CHECK_FAILED'; now: number }
   | { type: 'RETRY_AFTER_ERROR'; now: number }
   | { type: 'TRY_AGAIN'; now: number }
   | { type: 'START_NEW_ORDER'; now: number }

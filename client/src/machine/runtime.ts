@@ -34,6 +34,8 @@ export function createRuntime(opts: RuntimeOptions = {}) {
   let ticker: ReturnType<typeof setInterval> | null = null;
   let pollController: AbortController | null = null;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The interaction/key pair the current polling loop belongs to; polling follows the key, not the phase. */
+  let pollingFor: { interactionId: string; key: string } | null = null;
   const onPageShow = () => revalidate();
   const onVisibility = () => { if (document.visibilityState === 'visible') revalidate(); };
 
@@ -64,6 +66,17 @@ export function createRuntime(opts: RuntimeOptions = {}) {
     pollTimer = null;
     pollController?.abort();
     pollController = null;
+    pollingFor = null;
+  }
+
+  /** Polling exists exactly when the current submission is `submitted` with polling started, for THAT key. */
+  function reconcilePolling(): void {
+    const i = state.interaction;
+    const want = i && i.phase === 'submitted' && i.submission && i.submission.pollStartedAt !== null ? { interactionId: i.id, key: i.submission.idempotencyKey } : null;
+    const same = want && pollingFor && want.interactionId === pollingFor.interactionId && want.key === pollingFor.key;
+    if (same) return;
+    stopPolling();
+    if (want) startPolling(want.interactionId, want.key);
   }
 
   /** Side effects that follow a transition; kept out of the pure reducer. */
@@ -82,11 +95,7 @@ export function createRuntime(opts: RuntimeOptions = {}) {
     // The POST is sent exactly once, on PAY. A reload into `submitted` (RESUME) never re-sends: it polls by key.
     if (ev.type === 'PAY' && ni.phase === 'submitted' && ni.submission) void sendPost(ni.id, ni.submission);
 
-    const pollingNow = ni.phase === 'submitted' && ni.submission?.pollStartedAt !== null;
-    const pollingBefore = pi?.phase === 'submitted' && pi.submission?.pollStartedAt !== null;
-    if (pollingNow && !pollingBefore) startPolling(ni.id, ni.submission!.idempotencyKey);
-
-    if (ni.phase !== 'submitted' && pi?.phase === 'submitted') stopPolling();
+    reconcilePolling();
     if (ni.phase === 'unresolved' && pi?.phase !== 'unresolved') {
       telemetry(ni.id, 'unresolved_shown', { knownState: ni.submission?.knownState ?? 'none' }, ni.submission?.idempotencyKey);
     }
@@ -144,6 +153,7 @@ export function createRuntime(opts: RuntimeOptions = {}) {
     stopPolling();
     const controller = new AbortController();
     pollController = controller;
+    pollingFor = { interactionId, key };
     // Cadence is measured from the START of each poll (every 2 s), with at most one in flight.
     const tick = async () => {
       const i = state.interaction;
@@ -191,13 +201,11 @@ export function createRuntime(opts: RuntimeOptions = {}) {
       dispatch({ type: 'RESUME', now: t, interaction: load() });
     }
     const ni = state.interaction;
-    if (ni && ni.phase === 'submitted' && ni.submission) {
-      if (ni.submission.pollStartedAt === null) {
-        const due = pollDueAt(ni.submission);
-        if (due !== null && t >= due) dispatch({ type: 'POLL_START', now: t });
-      }
-      if (state.interaction?.submission?.pollStartedAt !== null && !pollController) startPolling(ni.id, ni.submission.idempotencyKey);
+    if (ni && ni.phase === 'submitted' && ni.submission && ni.submission.pollStartedAt === null) {
+      const due = pollDueAt(ni.submission);
+      if (due !== null && t >= due) dispatch({ type: 'POLL_START', now: t });
     }
+    reconcilePolling();
     if (ni && !state.menu && ni.phase !== 'idle' && !state.menuLoading) void loadMenu(ni.id);
   }
 
@@ -241,20 +249,37 @@ export function createRuntime(opts: RuntimeOptions = {}) {
       goMenu: () => dispatch({ type: 'GO_MENU', now: now() }),
       goPayment: () => {
         const i = state.interaction;
-        const kept = i && i.phase === 'building' && i.submission && i.submission.sentAt !== null ? i.submission : null;
+        const kept = i && i.phase === 'building' && i.submission && i.submission.sentAt !== null && i.submission.knownState === 'none' ? i.submission : null;
         if (!i || !kept) {
           dispatch({ type: 'GO_PAYMENT', now: now(), idempotencyKey: uuid() });
           return;
         }
-        // A sent-and-rejected key is checked once more before a new intent replaces it: under
-        // ADR-002's residual validation window a concurrent request may have accepted it after
-        // this client was told "rejected". Found → the recorded state is shown; not found → new key.
+        // A sent-and-rejected key with no known outcome is checked once more before a new intent
+        // replaces it (ADR-002 "The validation window"). One check at a time. Its continuation is
+        // admitted only if the review screen it started from is still current and the kept key is
+        // still the same object. Categories are handled explicitly:
+        //   outcome   → the recorded state is applied;
+        //   404       → the one case where "not found" permits a new intent (FR-009 must be possible);
+        //   anything else (network, 5xx, unrecognised body) → nothing is known, nothing new starts.
+        const before = state;
+        const after = dispatch({ type: 'CHECK_START', now: now() });
+        if (after === before) return; // a check is already in flight, or the screen is not the review
         const interactionId = i.id;
         const key = kept.idempotencyKey;
         void api.lookupByKey(key, interactionId).then((result) => {
-          if (result.category === 'outcome') admit({ source: 'lookup', interactionId, idempotencyKey: key, result });
+          dispatch({ type: 'CHECK_END', now: now() });
           const cur = state.interaction;
-          if (cur && cur.id === interactionId && cur.phase === 'building') dispatch({ type: 'GO_PAYMENT', now: now(), idempotencyKey: uuid() });
+          const stillCurrent = cur && cur.id === interactionId && cur.phase === 'building' && cur.screen === 'review' && cur.submission === kept;
+          if (result.category === 'outcome') {
+            if (stillCurrent) admit({ source: 'lookup', interactionId, idempotencyKey: key, result });
+            return;
+          }
+          if (!stillCurrent) return;
+          if (result.category === 'unknown' && result.notFound) {
+            dispatch({ type: 'GO_PAYMENT', now: now(), idempotencyKey: uuid() });
+            return;
+          }
+          dispatch({ type: 'CHECK_FAILED', now: now() });
         });
       },
       backToCart: () => dispatch({ type: 'BACK_TO_CART', now: now() }),

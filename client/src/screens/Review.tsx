@@ -6,12 +6,13 @@ import type { Cart } from '../machine/types.ts';
 interface Props {
   menu: MenuItem[] | null;
   cart: Cart;
+  checking: boolean;
   onConfirm: () => void;
   onBack: () => void;
   onStartNew: () => void;
 }
 
-export function Review({ menu, cart, onConfirm, onBack, onStartNew }: Props) {
+export function Review({ menu, cart, checking, onConfirm, onBack, onStartNew }: Props) {
   const byId = new Map((menu ?? []).map((m) => [m.id, m]));
   const total = cartTotalMinor(cart, menu);
   return (
@@ -42,7 +43,7 @@ export function Review({ menu, cart, onConfirm, onBack, onStartNew }: Props) {
       <footer className="actions">
         <button onClick={onBack}>Back</button>
         <span className="spacer" />
-        <button className="primary" onClick={onConfirm}>Continue to payment</button>
+        <button className="primary" onClick={onConfirm} disabled={checking} aria-busy={checking}>{checking ? 'Checking…' : 'Continue to payment'}</button>
       </footer>
     </div>
   );

@@ -43,7 +43,7 @@ export function App({ runtime }: { runtime: Runtime }) {
     case 'building':
       switch (i.screen) {
         case 'review':
-          screen = <Review menu={state.menu} cart={state.cart} onConfirm={a.goPayment} onBack={a.goMenu} onStartNew={a.startNewOrder} />;
+          screen = <Review menu={state.menu} cart={state.cart} checking={state.checkingKey} onConfirm={a.goPayment} onBack={a.goMenu} onStartNew={a.startNewOrder} />;
           break;
         case 'payment':
           screen = (

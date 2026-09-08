@@ -135,8 +135,11 @@ Conventions for every screen:
   this request created nothing, but under ADR-002's residual validation window a concurrent
   request with the same key may still be accepted. The rejected key is therefore **kept**, can
   never be re-sent, and is looked up once more when the customer confirms again (before a new key
-  is generated). Found paid → S5 with the recorded total; found declined → S6; found pending → S7a;
-  not found → a new intent and key. Emits `rejection_shown`.
+  is generated), one check at a time with the Continue control disabled meanwhile. Found paid → S5
+  with the recorded total; found declined → S6; found pending → S7a; `404` → a new intent and key
+  (the explicit exception in the contract's classification); network failure, 5xx or an
+  unrecognised body → S9 "we could not check your previous attempt", key kept, Try again re-checks.
+  A declined key is never kept: Edit order after S6 starts a new intent. Emits `rejection_shown`.
 - A re-pricing can push a previously valid cart over a bound (FR-006); S1's Review control stays
   disabled with the reason until the order is reduced.
 - Satisfies: US3, US7 scenarios 1–2.
