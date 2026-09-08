@@ -87,9 +87,12 @@ describe('US2: the intent is frozen from first send (ADR-002)', () => {
     const declined = reduce(submitted(t), { type: 'RESPONSE', now: t + 500, source: 'post', interactionId: IID, idempotencyKey: K1, result: { category: 'outcome', status: { orderId: 'o1', reference: 'AAAA', state: 'failed', totalMinor: 700, currency: 'USD', interactionId: IID, replay: false } } });
     expect(interactionOf(declined).phase).toBe('declined');
     expect(declined.cart.lines).toHaveLength(1);
-    const again = run([{ type: 'TRY_AGAIN', now: t + 600 }, { type: 'GO_PAYMENT', now: t + 700, idempotencyKey: K2 }], declined);
+    const again = reduce(declined, { type: 'RETRY_PAYMENT', now: t + 600, idempotencyKey: K2 });
     expect(interactionOf(again).phase).toBe('building');
+    expect(interactionOf(again).screen).toBe('payment'); // straight to payment: the decline was about payment, not contents
     expect(interactionOf(again).submission?.idempotencyKey).toBe(K2);
+    expect(interactionOf(again).submission?.sentAt).toBeNull();
+    expect(again.menuLoading).toBe(true); // the menu is still refreshed; a price change returns the customer to the review
   });
 });
 
@@ -188,7 +191,7 @@ describe('a menu failure outside building clears the loading flag so later refre
     expect(after.error).toBeNull();
     // a later Try again from a decline requests a refresh again (false → true)
     const declined = response(after, { now: t + 2, state: 'failed' });
-    const retry = reduce(declined, { type: 'TRY_AGAIN', now: t + 3 });
+    const retry = reduce(declined, { type: 'RETRY_PAYMENT', now: t + 3, idempotencyKey: K2 });
     expect(retry.menuLoading).toBe(true);
   });
 });

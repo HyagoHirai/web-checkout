@@ -279,6 +279,16 @@ one stack, because both assert deltas on the API's single set of counters. The r
 them in sequence; running them in parallel by hand produced one spurious failure that a solo rerun
 cleared.
 
+A small flow change followed the owner's use of the kiosk: on the declined screen, "Try again"
+returned to the review, which is the same content minus the warning and read as if nothing had
+happened, with payment still three taps away. It now goes straight to the payment screen with a
+fresh key: the customer already reviewed the order, the decline was about payment, and the outcome
+selector they need is there. "Edit order" still returns to the menu. This stays within
+`declined → building` (ADR-005; the unsent payment screen is part of building, ADR-002), so no
+document changed beyond the UI contract's S6 line. Implementing it showed that one event had been
+carrying two different transitions, the rejected path back to the review and the declined path
+onward, so they became two events, `TRY_AGAIN` and `RETRY_PAYMENT`.
+
 ## What I threw away
 
 - The `order_items` table from the first data model, in favour of a JSONB snapshot (recorded in

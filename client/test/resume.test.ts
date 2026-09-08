@@ -4,7 +4,7 @@ import { canReview } from '../src/machine/cart.ts';
 import { reduce } from '../src/machine/reducer.ts';
 import { isCurrent, load, save } from '../src/machine/storage.ts';
 import type { Interaction } from '../src/machine/types.ts';
-import { atPayment, COFFEE, IID, interactionOf, K1, MENU, response, run, submitted } from './helpers.ts';
+import { atPayment, COFFEE, IID, interactionOf, K1, K2, MENU, response, run, submitted } from './helpers.ts';
 
 /**
  * Review round three: the clock jumps while the app is suspended (bfcache, tab restore, laptop
@@ -89,8 +89,9 @@ describe('a decline after a reload can be retried with the frozen lines', () => 
     expect(restored.cart.lines).toEqual([{ itemId: COFFEE.id, quantity: 2 }]);
     const declined = response(restored, { now: 1_500, state: 'failed' });
     expect(interactionOf(declined).phase).toBe('declined');
-    const again = reduce(declined, { type: 'TRY_AGAIN', now: 2_000 });
-    expect(interactionOf(again).screen).toBe('review');
+    const again = reduce(declined, { type: 'RETRY_PAYMENT', now: 2_000, idempotencyKey: K2 });
+    expect(interactionOf(again).screen).toBe('payment'); // straight to payment: the order was already reviewed
+    expect(interactionOf(again).submission?.idempotencyKey).toBe(K2);
     expect(canReview(again.cart, MENU)).toBe(true);
   });
   it('a decline admitted with an empty cart rebuilds it from the frozen lines', () => {

@@ -43,7 +43,7 @@ export function App({ runtime }: { runtime: Runtime }) {
       screen = <Confirmed reference={submission?.reference ?? ''} totalMinor={recordedOrExpected} onDone={actions.done} />;
       break;
     case 'declined':
-      screen = <Declined lines={submission?.lines ?? []} totalMinor={recordedOrExpected} onTryAgain={actions.tryAgain} onEdit={actions.goMenu} onStartNew={actions.startNewOrder} />;
+      screen = <Declined lines={submission?.lines ?? []} totalMinor={recordedOrExpected} onTryAgain={actions.retryPayment} onEdit={actions.goMenu} onStartNew={actions.startNewOrder} />;
       break;
     case 'unresolved':
       screen = <Unresolved knownState={submission?.knownState === 'pending' ? 'pending' : 'none'} reference={submission?.reference ?? null} onStartNew={actions.startNewOrder} />;

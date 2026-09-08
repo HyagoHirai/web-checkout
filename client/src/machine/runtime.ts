@@ -290,6 +290,7 @@ export function createRuntime(opts: RuntimeOptions = {}) {
         dispatch({ type: 'RETRY_AFTER_ERROR', now: now() });
       },
       tryAgain: () => dispatch({ type: 'TRY_AGAIN', now: now() }),
+      retryPayment: () => dispatch({ type: 'RETRY_PAYMENT', now: now(), idempotencyKey: uuid() }),
       startNewOrder: () => dispatch({ type: 'START_NEW_ORDER', now: now() }),
       done: () => dispatch({ type: 'DONE', now: now() }),
     },

@@ -12,8 +12,8 @@ test('US6: a decline keeps the items; trying again is a new order; the first sta
   await expect(page.getByText('The card terminal declined the payment')).toBeVisible();
   await expect(page.locator('[data-screen="declined"] .review-line')).toHaveCount(2);
   await page.locator('[data-action="try-again"]').tap();
-  await expect(page.locator('[data-screen="review"]')).toBeVisible();
-  await page.getByRole('button', { name: 'Continue to payment' }).tap();
+  await expect(page.locator('[data-screen="payment"]')).toBeVisible(); // straight to payment: the order was already reviewed
+  await expect(page.locator('[data-screen="payment"] [data-total]')).toHaveText('$9.00');
   await choose(page, 'success');
   await pay(page);
   await expect(page.locator('[data-screen="confirmed"]')).toBeVisible({ timeout: 15_000 });
@@ -66,8 +66,6 @@ test('a menu refresh that finishes on the payment screen with an item unavailabl
   const posts: string[] = [];
   page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/api/orders')) posts.push(r.url()); });
   await page.locator('[data-action="try-again"]').tap();
-  await expect(page.locator('[data-screen="review"]')).toBeVisible();
-  await page.getByRole('button', { name: 'Continue to payment' }).tap();
   await expect(page.locator('[data-screen="payment"]')).toBeVisible();
   release();
   await expect(page.locator('[data-screen="menu"]')).toBeVisible();

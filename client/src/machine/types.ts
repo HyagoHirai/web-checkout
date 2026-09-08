@@ -105,6 +105,7 @@ export type Event =
   | { type: 'CHECK_FAILED'; now: number; checkId: number }
   | { type: 'RETRY_AFTER_ERROR'; now: number }
   | { type: 'TRY_AGAIN'; now: number }
+  | { type: 'RETRY_PAYMENT'; now: number; idempotencyKey: string }
   | { type: 'START_NEW_ORDER'; now: number }
   | { type: 'DONE'; now: number }
   | { type: 'RESUME'; now: number; interaction: Interaction | null };

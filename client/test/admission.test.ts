@@ -18,7 +18,7 @@ describe('US9: the five-condition response admission rule (FR-032..FR-034)', () 
   });
   it('3. a foreign key is discarded: a late K1 result never touches the K2 attempt', () => {
     const declined = response(submitted(t), { now: t + 100, state: 'failed' });
-    const k2 = run([{ type: 'TRY_AGAIN', now: t + 200 }, { type: 'GO_PAYMENT', now: t + 300, idempotencyKey: K2 }, { type: 'PAY', now: t + 400 }], declined);
+    const k2 = run([{ type: 'RETRY_PAYMENT', now: t + 200, idempotencyKey: K2 }, { type: 'PAY', now: t + 400 }], declined);
     expect(interactionOf(k2).submission?.idempotencyKey).toBe(K2);
     const lateK1 = response(k2, { now: t + 500, state: 'paid', idempotencyKey: K1 });
     expect(lateK1).toBe(k2);

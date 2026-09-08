@@ -20,7 +20,7 @@ export const initialState: State = {
 /** Events that count as customer activity (ADR-005, FR-027). Everything else never re-stamps. */
 const ACTIVITY = new Set<Event['type']>([
   'ADD_ITEM', 'SET_QTY', 'REMOVE_ITEM', 'GO_REVIEW', 'GO_MENU', 'GO_PAYMENT', 'BACK_TO_CART',
-  'SET_SIMULATION', 'PAY', 'CONTINUE', 'RETRY_AFTER_ERROR', 'TRY_AGAIN', 'DONE',
+  'SET_SIMULATION', 'PAY', 'CONTINUE', 'RETRY_AFTER_ERROR', 'TRY_AGAIN', 'RETRY_PAYMENT', 'DONE',
 ]);
 
 function stamp(i: Interaction, now: number): Interaction {
@@ -252,16 +252,24 @@ export function reduce(state: State, ev: Event): State {
       if (i.phase !== 'building' || i.screen !== 'error') return state;
       if (state.error?.kind === 'menu_unreachable') return { ...state, now, error: null, menuLoading: true, interaction: { ...active, screen: 'menu' } };
       return { ...state, now, error: null, interaction: { ...active, screen: canReview(state.cart, state.menu) ? 'review' : 'menu' } };
-    case 'TRY_AGAIN':
-      // from declined (new intent, cart intact) or from rejected (re-priced cart). The menu is
-      // re-fetched so the next intent is priced and flagged against current values (ui-states S8).
-      if (i.phase === 'declined' || (i.phase === 'building' && i.screen === 'rejected')) {
-        const target = canReview(state.cart, state.menu) ? 'review' : 'menu';
-        // a declined key is terminal for that order; a retained (rejected) key survives for the last check
-        const kept = i.phase === 'declined' ? null : retainedSubmission(i);
-        return { ...state, now, rejection: null, menuLoading: true, interaction: { ...active, phase: 'building', screen: target, submission: kept } };
-      }
-      return state;
+    case 'RETRY_PAYMENT': {
+      // From declined only: the customer already reviewed the order and the decline was about payment,
+      // so this goes straight to the payment screen with a fresh key (a declined key is terminal for
+      // that order, ADR-005; the unsent payment screen is part of building, ADR-002). The menu is
+      // re-fetched; a price change arriving on the payment screen sends the customer back to the review
+      // to see the new total before it is frozen again (applyMenuUpdate).
+      if (i.phase !== 'declined') return state;
+      if (!state.menu || !canReview(state.cart, state.menu)) return { ...state, now, menuLoading: true, interaction: { ...active, phase: 'building', screen: 'menu', submission: null } };
+      return { ...state, now, menuLoading: true, interaction: { ...active, phase: 'building', screen: 'payment', submission: newSubmission(state.cart, state.menu, ev.idempotencyKey) } };
+    }
+    case 'TRY_AGAIN': {
+      // From rejected only: back to the review with the re-priced cart, the retained key surviving for
+      // the last check before a new intent. The menu is re-fetched so the next intent is priced and
+      // flagged against current values (ui-states S8).
+      if (i.phase !== 'building' || i.screen !== 'rejected') return state;
+      const target = canReview(state.cart, state.menu) ? 'review' : 'menu';
+      return { ...state, now, rejection: null, menuLoading: true, interaction: { ...active, phase: 'building', screen: target, submission: retainedSubmission(i) } };
+    }
     case 'DONE':
       if (i.phase !== 'confirmed') return state;
       return toIdle(state, now);

@@ -102,8 +102,8 @@ test.describe('reload and suspension in the browser', () => {
     await expect(page.locator('[data-screen="declined"]')).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-screen="declined"] .review-line')).toHaveCount(1);
     await page.locator('[data-action="try-again"]').tap();
-    await expect(page.locator('[data-screen="review"]')).toBeVisible();
-    await expect(page.locator('[data-screen="review"] [data-total]')).toHaveText('$7.00');
+    await expect(page.locator('[data-screen="payment"]')).toBeVisible();
+    await expect(page.locator('[data-screen="payment"] [data-total]')).toHaveText('$7.00');
   });
 
   test('switching tabs keeps the cart (finding 2)', async ({ page, context }) => {

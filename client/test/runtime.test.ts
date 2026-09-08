@@ -567,9 +567,7 @@ describe('the last check: unrecognised 404s and check identity; late menu update
     rt.actions.pay();
     await vi.advanceTimersByTimeAsync(10);
     expect(rt.getState().interaction?.phase).toBe('declined');
-    rt.actions.tryAgain(); // menu refresh starts (held); review shown at once
-    expect(rt.getState().interaction?.screen).toBe('review');
-    rt.actions.goPayment();
+    rt.actions.retryPayment(); // menu refresh starts (held); the payment screen is shown at once with a fresh key
     expect(rt.getState().interaction?.screen).toBe('payment');
     releaseMenu();
     await vi.advanceTimersByTimeAsync(10);

@@ -101,8 +101,12 @@ Conventions for every screen:
 - Shows: that payment was declined, in plain words, with the items still listed (FR-020). After a
   reload in `submitted` that ends here, the items come from the persisted frozen submission (names,
   prices, quantities as displayed at send).
-- Actions: **Try again** → S2 with the cart intact; this is a new intent with a new key (FR-021),
-  validated afresh by the server like any new submission. **Edit order** → S1. **Start new order**.
+- Actions: **Try again** → S3 directly, with the cart intact and a fresh key (FR-021): the customer
+  already reviewed the order and the decline was about payment, and the outcome selector they need
+  is on S3. Still `declined → building` (ADR-005; the unsent payment screen is part of building,
+  ADR-002), validated afresh by the server like any new submission. If a menu refresh moves a price
+  while S3 is showing, the customer is returned to S2 to see the new total. **Edit order** → S1.
+  **Start new order**.
 - Satisfies: US6.
 
 ### S7 Unresolved (two wordings, FR-023)
