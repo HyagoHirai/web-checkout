@@ -1,7 +1,7 @@
-import { MAX_QTY_PER_LINE, MAX_TOTAL_MINOR, MAX_UNITS_PER_ORDER } from '../../../shared/constants.ts';
+import { MAX_QTY_PER_LINE, MAX_TOTAL_MINOR, MAX_UNITS_PER_ORDER, NETWORK_WAIT_MS } from '../../../shared/constants.ts';
 import type { MenuItem, OrderStatus } from '../../../shared/wire.ts';
-import { inactivityDeadline, isExpired, waitIsOver } from './deadlines.ts';
-import type { Cart, Classified, Event, FrozenLine, Interaction, KnownState, State, Submission } from './types.ts';
+import { inactivityDeadline, isExpired, normalize } from './deadlines.ts';
+import { INTERACTION_FORMAT_VERSION, type Cart, type Event, type FrozenLine, type Interaction, type KnownState, type State, type Submission } from './types.ts';
 
 export const initialState: State = {
   interaction: null,
@@ -53,6 +53,18 @@ function setLine(cart: Cart, itemId: string, quantity: number): Cart {
   return { lines, flagged: cart.flagged.filter((f) => f !== itemId || quantity > 0) };
 }
 
+/** After a reload the cart is gone but the frozen submission is not: rebuild the customer's lines from it. */
+function cartFromFrozen(lines: readonly FrozenLine[]): Cart {
+  return { lines: lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity })), flagged: [] };
+}
+
+/** Lines whose item is gone from the menu or unavailable on it must be acted on before review (FR-010). */
+function reflag(cart: Cart, menu: MenuItem[]): Cart {
+  const byId = new Map(menu.map((m) => [m.id, m]));
+  const flagged = cart.lines.filter((l) => !byId.get(l.itemId)?.available).map((l) => l.itemId);
+  return { ...cart, flagged: [...new Set([...cart.flagged.filter((f) => cart.lines.some((l) => l.itemId === f)), ...flagged])] };
+}
+
 function freeze(cart: Cart, menu: MenuItem[]): FrozenLine[] {
   const byId = new Map(menu.map((m) => [m.id, m]));
   return [...cart.lines]
@@ -85,9 +97,10 @@ function attributed(i: Interaction, ev: { interactionId: string; idempotencyKey:
  * rule and the deadline preservation rule (research R4, data-model.md, contracts/ui-states.md).
  */
 function applyResponse(state: State, ev: Extract<Event, { type: 'RESPONSE' }>): State {
-  const i = state.interaction;
-  if (!i || !i.submission) return state; // 1. no live interaction
-  if (isExpired(i, ev.now)) return state; // 1. interaction not valid
+  const live = state.interaction;
+  if (!live || !live.submission) return state; // 1. no live interaction
+  const i = normalize(live, ev.now); // 1. valid by the clock, with a finished wait already applied
+  if (!i || !i.submission) return state;
   if (!attributed(i, ev)) return state; // 2, 3. interaction and intent
   if (i.phase !== 'submitted' && i.phase !== 'unresolved') return state; // 4. nothing leaves confirmed/declined; 5. terminal not reapplied
   const sub = i.submission;
@@ -107,9 +120,11 @@ function applyResponse(state: State, ev: Extract<Event, { type: 'RESPONSE' }>): 
       if (known === 'paid') {
         return { ...state, interaction: { ...i, phase: 'confirmed', resolvedAt: ev.now, submission: nextSub } };
       }
-      // failed: a late decline preserves the deadline in force; an in-time one is ordinary building math
+      // failed: a late decline preserves the deadline in force; an in-time one is ordinary building math.
+      // After a reload the cart is empty: rebuild it from the frozen lines so Try again has an order.
       const deadlineAt = i.phase === 'unresolved' ? inactivityDeadline(i) : null;
-      return { ...state, interaction: { ...i, phase: 'declined', screen: 'menu', deadlineAt, submission: nextSub } };
+      const cart = state.cart.lines.length > 0 ? state.cart : cartFromFrozen(sub.lines);
+      return { ...state, cart, interaction: { ...i, phase: 'declined', screen: 'menu', deadlineAt, submission: nextSub } };
     }
     case 'conflict':
       // an order exists under this key and may be paid: the runtime performs a lookup; nothing changes here
@@ -118,13 +133,15 @@ function applyResponse(state: State, ev: Extract<Event, { type: 'RESPONSE' }>): 
       if (i.phase !== 'submitted') return state;
       const current = new Map((r.rejection.currentItems ?? []).map((m) => [m.id, m]));
       const menu = state.menu ? state.menu.map((m) => current.get(m.id) ?? m) : state.menu;
-      const flaggedIds = r.rejection.reasons.includes('item_unavailable')
-        ? (r.rejection.currentItems ?? []).filter((m) => !m.available).map((m) => m.id)
-        : [];
+      const affected = r.rejection.affectedItemIds ?? [];
+      const unavailableIds = (r.rejection.currentItems ?? []).filter((m) => !m.available).map((m) => m.id);
+      // the server omits unknown items from currentItems: an affected id that is not there is gone from the menu
+      const unknownIds = r.rejection.reasons.includes('unknown_item') ? affected.filter((id) => !current.has(id)) : [];
+      const baseCart = state.cart.lines.length > 0 ? state.cart : cartFromFrozen(sub.lines);
       return {
         ...state,
         menu,
-        cart: { ...state.cart, flagged: [...new Set([...state.cart.flagged, ...flaggedIds])] },
+        cart: { ...baseCart, flagged: [...new Set([...baseCart.flagged, ...unavailableIds, ...unknownIds])] },
         rejection: { reasons: r.rejection.reasons, affectedItemIds: r.rejection.affectedItemIds ?? [], currentTotalMinor: r.rejection.currentTotalMinor },
         interaction: { ...i, phase: 'building', screen: 'rejected', submission: null },
       };
@@ -148,26 +165,38 @@ export function reduce(state: State, ev: Event): State {
   const i = state.interaction;
   const now = ev.now;
 
+  /**
+   * Hydration from storage after a fresh load. The clock is applied first (a finished wait, an
+   * expired deadline). Then, by phase: a `building` record starts again at the menu with an empty
+   * cart and no unsent intent (spec edge case: a reload before submission loses the cart); any
+   * phase with a sent submission rebuilds the cart from the frozen lines so the declined screen's
+   * Try again has an order to retry.
+   */
   if (ev.type === 'RESUME') {
-    const restored = ev.interaction;
-    if (!restored || restored.phase === 'idle' || isExpired(restored, now)) return toIdle(state, now);
-    return { ...initialState, now, menu: state.menu, interaction: restored };
+    const restored = ev.interaction ? normalize(ev.interaction, now) : null;
+    if (!restored) return toIdle(state, now);
+    if (restored.phase === 'building') {
+      return { ...initialState, now, menu: state.menu, interaction: { ...restored, screen: 'menu', submission: null, deadlineAt: restored.deadlineAt } };
+    }
+    return { ...initialState, now, menu: state.menu, cart: restored.submission ? cartFromFrozen(restored.submission.lines) : initialState.cart, interaction: restored };
   }
 
   if (ev.type === 'START') {
     if (i && i.phase !== 'idle') return state;
     return {
       ...initialState, now, menu: state.menu, menuLoading: true,
-      interaction: { id: ev.interactionId, startedAt: now, lastActivityAt: now, phase: 'building', screen: 'menu', resolvedAt: null, deadlineAt: null, submission: null },
+      interaction: { v: INTERACTION_FORMAT_VERSION, id: ev.interactionId, startedAt: now, lastActivityAt: now, phase: 'building', screen: 'menu', resolvedAt: null, deadlineAt: null, submission: null },
     };
   }
 
   if (ev.type === 'START_NEW_ORDER') return toIdle(state, now);
 
+  /** TICK is also what a live-page revalidation dispatches: it applies the clock and nothing else. */
   if (ev.type === 'TICK') {
     if (!i) return { ...state, now };
-    if (isExpired(i, now)) return toIdle(state, now);
-    if (waitIsOver(i, now)) return { ...state, now, interaction: { ...i, phase: 'unresolved' } };
+    const norm = normalize(i, now);
+    if (!norm) return toIdle(state, now);
+    if (norm !== i) return { ...state, now, interaction: norm };
     return state.now === now ? state : { ...state, now };
   }
 
@@ -178,8 +207,12 @@ export function reduce(state: State, ev: Event): State {
   const active = ACTIVITY.has(ev.type) ? stamp(i, now) : i;
 
   switch (ev.type) {
-    case 'MENU_LOADED':
-      return { ...state, now, menu: ev.items, menuLoading: false, interaction: active };
+    case 'MENU_LOADED': {
+      const cart = reflag(state.cart, ev.items);
+      // a line flagged by a fresh menu must be acted on: leave review for the menu (FR-010)
+      const screen = cart.flagged.length > 0 && i.phase === 'building' && i.screen === 'review' ? 'menu' : active.screen;
+      return { ...state, now, menu: ev.items, menuLoading: false, cart, interaction: { ...active, screen } };
+    }
     case 'MENU_FAILED':
       if (i.phase !== 'building') return state;
       return { ...state, now, menuLoading: false, error: { kind: 'menu_unreachable' }, interaction: { ...active, screen: 'error' } };
@@ -222,9 +255,12 @@ export function reduce(state: State, ev: Event): State {
     case 'PAY':
       if (i.phase !== 'building' || i.screen !== 'payment' || !i.submission || i.submission.sentAt !== null) return state;
       return { ...state, now, interaction: { ...active, phase: 'submitted', submission: { ...i.submission, sentAt: now } } };
-    case 'POLL_START':
+    case 'POLL_START': {
       if (i.phase !== 'submitted' || !i.submission || i.submission.pollStartedAt !== null) return state;
-      return { ...state, now, interaction: { ...i, submission: { ...i.submission, pollStartedAt: now } } };
+      // a poll that could only start late (the app was suspended) must not extend the wait
+      const due = (i.submission.sentAt ?? now) + NETWORK_WAIT_MS;
+      return { ...state, now, interaction: { ...i, submission: { ...i.submission, pollStartedAt: Math.min(now, due) } } };
+    }
     case 'CONTINUE':
       return { ...state, now, interaction: active };
     case 'RETRY_AFTER_ERROR':
@@ -232,10 +268,11 @@ export function reduce(state: State, ev: Event): State {
       if (state.error?.kind === 'menu_unreachable') return { ...state, now, error: null, menuLoading: true, interaction: { ...active, screen: 'menu' } };
       return { ...state, now, error: null, interaction: { ...active, screen: canReview(state.cart) ? 'review' : 'menu' } };
     case 'TRY_AGAIN':
-      // from declined (new intent, cart intact) or from rejected (re-priced cart)
+      // from declined (new intent, cart intact) or from rejected (re-priced cart). The menu is
+      // re-fetched so the next intent is priced and flagged against current values (ui-states S8).
       if (i.phase === 'declined' || (i.phase === 'building' && i.screen === 'rejected')) {
         const target = canReview(state.cart) ? 'review' : 'menu';
-        return { ...state, now, rejection: null, interaction: { ...active, phase: 'building', screen: target, submission: null } };
+        return { ...state, now, rejection: null, menuLoading: true, interaction: { ...active, phase: 'building', screen: target, submission: null } };
       }
       return state;
     case 'DONE':

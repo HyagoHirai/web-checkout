@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { lookup, makeTestApp, metrics, post, submission, type TestApp } from '../helpers/app.ts';
 import { truncateOrders } from '../helpers/db.ts';
 
 let t: TestApp;
 beforeEach(async () => { t = await makeTestApp(); await truncateOrders(t.pool); });
-afterAll(async () => { await t.app.close(); });
+afterEach(async () => { await t.app.close(); });
 
 describe('US4: status lookup by key (ADR-002 "Recovery when the client loses state")', () => {
   it('returns each state and echoes the request interaction id', async () => {

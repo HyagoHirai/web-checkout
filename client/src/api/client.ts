@@ -7,7 +7,20 @@ const STATES = new Set(['pending_payment', 'paid', 'failed']);
 
 function isOrderStatus(v: unknown): v is OrderStatus {
   const o = v as Record<string, unknown> | null;
-  return !!o && typeof o === 'object' && typeof o.orderId === 'string' && typeof o.reference === 'string' && STATES.has(o.state as string) && typeof o.interactionId === 'string';
+  return (
+    !!o && typeof o === 'object' && typeof o.orderId === 'string' && typeof o.reference === 'string' && STATES.has(o.state as string) &&
+    typeof o.interactionId === 'string' && Number.isInteger(o.totalMinor) && o.currency === 'USD' && typeof o.replay === 'boolean'
+  );
+}
+
+function isMenuItem(v: unknown): v is MenuResponse['items'][number] {
+  const o = v as Record<string, unknown> | null;
+  return !!o && typeof o === 'object' && typeof o.id === 'string' && typeof o.name === 'string' && Number.isInteger(o.priceMinor) && (o.priceMinor as number) > 0 && typeof o.available === 'boolean';
+}
+
+function isMenuResponse(v: unknown): v is MenuResponse {
+  const o = v as Record<string, unknown> | null;
+  return !!o && typeof o === 'object' && o.currency === 'USD' && Array.isArray(o.items) && o.items.every(isMenuItem);
 }
 
 function isRejection(v: unknown): v is ValidationRejection {
@@ -42,7 +55,9 @@ export function createApi(fetchImpl: Fetch = (...a) => fetch(...a)) {
     async fetchMenu(): Promise<MenuResponse> {
       const res = await fetchImpl('/api/menu', { headers: { accept: 'application/json' } });
       if (!res.ok) throw new Error(`menu ${res.status}`);
-      return (await res.json()) as MenuResponse;
+      const body: unknown = await res.json();
+      if (!isMenuResponse(body)) throw new Error('menu: unrecognised body');
+      return body;
     },
     /** Never aborted by the caller (research R10). Rejects only on a network failure. */
     async postOrder(submission: OrderSubmission, interactionId: string): Promise<Classified> {

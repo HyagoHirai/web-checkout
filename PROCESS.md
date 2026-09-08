@@ -90,6 +90,23 @@ Specific, because the point is what had to be noticed.
   "+" nine times when eight reached the cap; a helper pricing from seed constants after the test
   had changed the database price; and asserting a telemetry delta before the held response had
   even been fetched. None was a product defect; all were found by running the tests.
+- **The clock only ever moved continuously in my tests.** A third review, by another agent after
+  implementation, found seven defects that all share one cause: every timing test advanced the
+  clock tick by tick, so nothing exercised a clock that *jumped* while the app was suspended, or a
+  reload in the middle of a flow. Concretely: (1) a `submitted` interaction had no inactivity
+  deadline, so resuming it ten minutes later was allowed, and a late poll start granted a fresh 30 s
+  wait; a `paid` for a long-dead session could then be admitted, which is exactly the stranger's-
+  order failure the P1 stories exist to prevent. (2) Every revalidation on `pageshow` or
+  visibility dispatched a hydration event that rebuilt state from scratch, so switching tabs
+  emptied a live cart. (3) The test-database guard checked a constant, not the URL actually
+  connected, and migrations and the seed ran before any guard. (4) A reload before Pay kept an
+  unsent intent on the payment screen with an empty cart. (5) A decline after a reload showed the
+  frozen items but Try again used the empty cart. (6) Storage validation checked fields, not the
+  invariants between them. (7) `unknown_item` flagged nothing and Review again never re-fetched
+  the menu. Fixed with one `normalize(interaction, now)` applied by RESUME, TICK and the admission
+  rule; hydration by phase; a live-page revalidation that only applies the clock; a union-typed
+  storage validator with a format version; a guard on `current_database()` before every write;
+  and 20 new tests whose clock jumps rather than ticks.
 
 ---
 
@@ -153,6 +170,12 @@ volume path that the verifier had already corrected; three incompatible test-run
 incompatible TypeScript execution models; `format: uuid` in the contract versus a strict pattern in
 the research; the interaction id in the body in one document and in a header in another. All
 refinements, resolved by reconciliation.
+
+**Round three** (by another agent, on the implemented code, after the owner's "no further
+review round" on the documents) found the seven suspension-and-reload defects listed under "Where
+the AI got it wrong". All reproduced; all are fixed with tests whose clock jumps. The reviewer's
+minor items (polling cadence measured from the start of a poll, listeners removed on stop, HTTP
+bodies validated before the reducer sees them, per-test app teardown) were applied as well.
 
 **Round two** (on the corrected documents) found genuine defects, not refinements: the deadline
 regression on a late decline; response admission keyed on the interaction rather than the intent;

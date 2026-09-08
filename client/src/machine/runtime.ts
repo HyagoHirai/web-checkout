@@ -34,6 +34,8 @@ export function createRuntime(opts: RuntimeOptions = {}) {
   let ticker: ReturnType<typeof setInterval> | null = null;
   let pollController: AbortController | null = null;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  const onPageShow = () => revalidate();
+  const onVisibility = () => { if (document.visibilityState === 'visible') revalidate(); };
 
   function notify(): void {
     for (const l of listeners) l();
@@ -142,16 +144,20 @@ export function createRuntime(opts: RuntimeOptions = {}) {
     stopPolling();
     const controller = new AbortController();
     pollController = controller;
+    // Cadence is measured from the START of each poll (every 2 s), with at most one in flight.
     const tick = async () => {
       const i = state.interaction;
       if (controller.signal.aborted || !i || i.id !== interactionId || i.phase !== 'submitted' || i.submission?.idempotencyKey !== key) return;
       const end = i.submission ? waitEndedAt(i.submission) : null;
       if (end !== null && now() >= end) return;
+      const startedAt = now();
       const perPoll = AbortSignal.any ? AbortSignal.any([controller.signal, AbortSignal.timeout(POLL_INTERVAL_MS)]) : controller.signal;
       const result = await api.lookupByKey(key, interactionId, perPoll);
       if (controller.signal.aborted) return;
       admit({ source: 'poll', interactionId, idempotencyKey: key, result });
-      if (!controller.signal.aborted && state.interaction?.phase === 'submitted') pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+      if (!controller.signal.aborted && state.interaction?.phase === 'submitted') {
+        pollTimer = setTimeout(tick, Math.max(0, POLL_INTERVAL_MS - (now() - startedAt)));
+      }
     };
     void tick();
   }
@@ -166,10 +172,15 @@ export function createRuntime(opts: RuntimeOptions = {}) {
     dispatch({ type: 'TICK', now: t });
   }
 
+  /**
+   * A live page (pageshow after a bfcache restore, a tab becoming visible) keeps its in-memory
+   * state and only has the clock applied: TICK. Only a fresh load with nothing in memory hydrates
+   * from storage: RESUME. Both run synchronously before any buffered response can be admitted.
+   */
   function revalidate(): void {
     const t = now();
-    const i = state.interaction ?? load();
-    dispatch({ type: 'RESUME', now: t, interaction: i });
+    if (state.interaction) dispatch({ type: 'TICK', now: t });
+    else dispatch({ type: 'RESUME', now: t, interaction: load() });
     const ni = state.interaction;
     if (ni && ni.phase === 'submitted' && ni.submission) {
       if (ni.submission.pollStartedAt === null) {
@@ -185,8 +196,8 @@ export function createRuntime(opts: RuntimeOptions = {}) {
     revalidate();
     if (!ticker) ticker = setInterval(tickOnce, tickMs);
     if (typeof window !== 'undefined') {
-      window.addEventListener('pageshow', () => revalidate());
-      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') revalidate(); });
+      window.addEventListener('pageshow', onPageShow);
+      document.addEventListener('visibilitychange', onVisibility);
     }
   }
 
@@ -194,6 +205,10 @@ export function createRuntime(opts: RuntimeOptions = {}) {
     if (ticker) clearInterval(ticker);
     ticker = null;
     stopPolling();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pageshow', onPageShow);
+      document.removeEventListener('visibilitychange', onVisibility);
+    }
   }
 
   return {

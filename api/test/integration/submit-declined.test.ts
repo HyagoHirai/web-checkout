@@ -1,10 +1,10 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeTestApp, metrics, post, submission, type TestApp } from '../helpers/app.ts';
 import { countOrders, ordersByKey, truncateOrders } from '../helpers/db.ts';
 
 let t: TestApp;
 beforeEach(async () => { t = await makeTestApp(); await truncateOrders(t.pool); });
-afterAll(async () => { await t.app.close(); });
+afterEach(async () => { await t.app.close(); });
 
 describe('US6: a definitive decline (FR-020, FR-021)', () => {
   it('records failed, returns 201 failed (not 402), and a replay stays failed', async () => {

@@ -238,3 +238,68 @@ describe('US9: discarded responses are reported', () => {
     expect(emitted).toContain('foreign_response_discarded');
   });
 });
+
+describe('review round three: suspension, visibility, cleanup, cadence', () => {
+  it('finding 2: a visibility change keeps the cart of a live interaction', async () => {
+    await toPayment();
+    rt.actions.backToCart();
+    expect(rt.getState().cart.lines).toEqual([{ itemId: COFFEE.id, quantity: 2 }]);
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('pageshow'));
+    rt.revalidate();
+    expect(rt.getState().cart.lines).toEqual([{ itemId: COFFEE.id, quantity: 2 }]);
+    expect(rt.getState().interaction?.phase).toBe('building');
+  });
+
+  it('finding 1 at the runtime: resuming a submitted record after 600 s suspended goes idle, not to a fresh wait', async () => {
+    ff.setPost(() => new Promise<Response>(() => {}));
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(10);
+    rt.stop();
+    vi.setSystemTime(Date.now() + 600_000); // the clock jumps while nothing ticks
+    const rt2 = createRuntime({ api: createApi(ff.impl), uuid: () => IID, emit: (_i, name) => { emitted.push(name); } });
+    rt2.boot();
+    expect(rt2.getState().interaction).toBeNull();
+    expect(ff.gets()).toHaveLength(0);
+    rt2.stop();
+  });
+
+  it('finding 1 at the runtime: resumed at 40 s the wait is over and a late paid is still applied (interaction valid until 128 s)', async () => {
+    ff.setPost(() => new Promise<Response>(() => {}));
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(10);
+    rt.stop();
+    vi.setSystemTime(Date.now() + 40_000);
+    ff.setGet(() => json(200, orderStatus('paid', IID, { replay: true })));
+    const rt2 = createRuntime({ api: createApi(ff.impl), uuid: () => IID, emit: (_i, name) => { emitted.push(name); } });
+    rt2.boot();
+    expect(rt2.getState().interaction?.phase).toBe('unresolved');
+    expect(ff.gets()).toHaveLength(0); // no polling after the wait ended
+    rt2.stop();
+  });
+
+  it('stop() removes the page listeners so a stopped runtime no longer reacts', async () => {
+    await toPayment();
+    rt.actions.backToCart();
+    const before = rt.getState();
+    rt.stop();
+    vi.setSystemTime(Date.now() + 200_000);
+    window.dispatchEvent(new Event('pageshow'));
+    expect(rt.getState()).toBe(before); // untouched: the listener is gone
+  });
+
+  it('polling cadence is measured from the start of each poll', async () => {
+    ff.setPost(() => new Promise<Response>(() => {}));
+    ff.setGet(() => new Promise<Response>((r) => { setTimeout(() => r(json(404, { error: 'not_found' })), 1_500); }));
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(8_300);
+    expect(ff.gets()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2_000); // 1.5 s response + 0.5 s → the next poll at +2 s, not +3.5 s
+    expect(ff.gets()).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(ff.gets()).toHaveLength(3);
+  });
+});

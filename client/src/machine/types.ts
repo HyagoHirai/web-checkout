@@ -45,8 +45,11 @@ export interface ErrorInfo {
   kind: 'menu_unreachable' | 'bad_request' | 'reference_exhausted';
 }
 
+export const INTERACTION_FORMAT_VERSION = 1;
+
 /** Persisted in sessionStorage (data-model.md "Interaction"). */
 export interface Interaction {
+  v: typeof INTERACTION_FORMAT_VERSION;
   id: string;
   startedAt: number;
   lastActivityAt: number;

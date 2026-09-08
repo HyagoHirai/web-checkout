@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { COUNTER_NAMES } from '../../src/observability/counters.ts';
 import { makeTestApp, metrics, type TestApp } from '../helpers/app.ts';
 
 let t: TestApp;
 beforeEach(async () => { t = await makeTestApp(); });
-afterAll(async () => { await t.app.close(); });
+afterEach(async () => { await t.app.close(); });
 
 describe('observability surface (constitution VI)', () => {
   it('metrics exposes every catalogue key at 0 on a fresh app, with startedAt', async () => {

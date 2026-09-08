@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeTestApp, post, submission, type TestApp } from '../helpers/app.ts';
 import { countOrders, ordersByKey, truncateOrders } from '../helpers/db.ts';
 
@@ -24,7 +24,7 @@ describe('US2: N concurrent same-key POSTs (SC-002, ADR-002 "only one request pe
     t = await makeTestApp({ hooks: { beforeInsert: () => b.wait() } });
     await truncateOrders(t.pool);
   });
-  afterAll(async () => { await t.app.close(); });
+  afterEach(async () => { await t.app.close(); });
 
   it('creates exactly one order and executes payment exactly once; every response carries the same orderId', async () => {
     const body = submission([{ slug: 'coffee', quantity: 1 }, { slug: 'cookie', quantity: 2 }]);

@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeTestApp, metrics, post, submission, ITEM, type TestApp } from '../helpers/app.ts';
 import { countOrders, ordersByKey, resetMenu, setMenuItem, truncateOrders } from '../helpers/db.ts';
 
@@ -8,7 +8,7 @@ beforeEach(async () => {
   await truncateOrders(t.pool);
   await resetMenu(t.pool);
 });
-afterAll(async () => { await resetMenu(t.pool); await t.app.close(); });
+afterEach(async () => { await resetMenu(t.pool); await t.app.close(); });
 
 describe('US1: bounds and availability enforced independently by the server (FR-003, FR-006)', () => {
   it('rejects quantity 11 with no row and leaves the key usable', async () => {

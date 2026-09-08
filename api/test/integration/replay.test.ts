@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeTestApp, metrics, post, submission, ITEM, type TestApp } from '../helpers/app.ts';
 import { countOrders, ordersByKey, resetMenu, setMenuItem, truncateOrders } from '../helpers/db.ts';
 
@@ -8,7 +8,7 @@ beforeEach(async () => {
   await truncateOrders(t.pool);
   await resetMenu(t.pool);
 });
-afterAll(async () => { await resetMenu(t.pool); await t.app.close(); });
+afterEach(async () => { await resetMenu(t.pool); await t.app.close(); });
 
 describe('US2: replay semantics (ADR-002 "Replay behaviour", FR-014..FR-018)', () => {
   it('replays a paid order with the recorded state and executes nothing', async () => {

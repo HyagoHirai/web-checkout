@@ -11,11 +11,31 @@ export function pollDueAt(sub: Submission): number | null {
   return sub.sentAt === null ? null : sub.sentAt + NETWORK_WAIT_MS;
 }
 
-/** The bounded wait ends 30 s after polling started (OV-2), never later than sentAt + 38 s. */
+/**
+ * The bounded wait ends 30 s after polling started (OV-2), never later than sentAt + 38 s. The clamp
+ * matters when the app was suspended: a poll that could only start late must not extend the wait.
+ */
 export function waitEndedAt(sub: Submission): number | null {
-  if (sub.pollStartedAt !== null) return sub.pollStartedAt + POLL_MAX_MS;
   const due = pollDueAt(sub);
-  return due === null ? null : due + POLL_MAX_MS;
+  if (due === null) return null;
+  const start = sub.pollStartedAt === null ? due : Math.min(sub.pollStartedAt, due);
+  return start + POLL_MAX_MS;
+}
+
+/**
+ * Normalise an interaction against the clock: a `submitted` interaction whose wait is over becomes
+ * `unresolved`, and anything past its deadline becomes null (idle). Used by RESUME, TICK and the
+ * admission rule, so a clock that jumped while the app was suspended is applied before any effect
+ * or response, not one tick at a time.
+ */
+export function normalize(i: Interaction, now: number): Interaction | null {
+  let cur = i;
+  if (cur.phase === 'submitted' && cur.submission) {
+    const end = waitEndedAt(cur.submission);
+    if (end !== null && now >= end) cur = { ...cur, phase: 'unresolved' };
+  }
+  if (cur.phase === 'idle') return null;
+  return isExpired(cur, now) ? null : cur;
 }
 
 export function inactivityDeadline(i: Interaction): number | null {

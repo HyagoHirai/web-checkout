@@ -76,3 +76,45 @@ test.describe('US2: submitting more than once creates one order', () => {
     expect(new Set(refs).size).toBe(2);
   });
 });
+
+test.describe('review round three: reload and suspension in the browser', () => {
+  test('a reload before Pay loses the cart and the unsent intent; the customer starts again (spec edge case)', async ({ page }) => {
+    await page.goto('/');
+    await startAndAdd(page, [{ name: 'Coffee', times: 1 }]);
+    await goToPayment(page);
+    await page.reload();
+    await expect(page.locator('[data-screen="menu"]')).toBeVisible();
+    await expect(page.locator('[data-line]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Review order' })).toBeDisabled();
+  });
+
+  test('a decline after a reload can be retried with the same items (finding 5)', async ({ page }) => {
+    await page.goto('/');
+    await startAndAdd(page, [{ name: 'Coffee', times: 2 }]);
+    await goToPayment(page);
+    // hold the POST so the reload happens mid-wait; the server records the decline meanwhile
+    await page.route('**/api/orders', async (route) => { await route.fetch(); await new Promise(() => {}); }, { times: 1 });
+    await choose(page, 'declined');
+    await pay(page);
+    await expect(page.locator('[data-screen="waiting"]')).toBeVisible();
+    await page.waitForTimeout(2_500);
+    await page.reload();
+    await expect(page.locator('[data-screen="declined"]')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-screen="declined"] .review-line')).toHaveCount(1);
+    await page.locator('[data-action="try-again"]').tap();
+    await expect(page.locator('[data-screen="review"]')).toBeVisible();
+    await expect(page.locator('[data-screen="review"] [data-total]')).toHaveText('$7.00');
+  });
+
+  test('switching tabs keeps the cart (finding 2)', async ({ page, context }) => {
+    await page.goto('/');
+    await startAndAdd(page, [{ name: 'Coffee', times: 2 }]);
+    const other = await context.newPage();
+    await other.goto('about:blank');
+    await other.bringToFront();
+    await page.bringToFront();
+    await expect(page.locator('[data-line]')).toHaveCount(1);
+    await expect(page.locator('[data-total]')).toHaveText('$7.00');
+    await other.close();
+  });
+});

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { REFERENCE_PATTERN } from '../../../shared/constants.ts';
 import { makeTestApp, metrics, post, submission, type TestApp } from '../helpers/app.ts';
 import { ordersByKey, truncateOrders } from '../helpers/db.ts';
@@ -9,7 +9,7 @@ beforeEach(async () => {
   t = await makeTestApp();
   await truncateOrders(t.pool);
 });
-afterAll(async () => { await t.app.close(); });
+afterEach(async () => { await t.app.close(); });
 
 describe('US1: submit and pay (happy path)', () => {
   it('accepts, executes payment once, records paid, returns a counter reference', async () => {

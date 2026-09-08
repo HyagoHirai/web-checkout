@@ -4,17 +4,28 @@ import { migrate } from '../../src/db/migrate.ts';
 import { seed } from '../../src/db/seed.ts';
 import { createPool, type Pool } from '../../src/db/pool.ts';
 
-export const TEST_DB_NAME = 'webcheckout_test';
 const dbPort = process.env.DB_PORT ?? '54329';
 export const TEST_DATABASE_URL =
-  process.env.DATABASE_URL_TEST ?? `postgres://checkout:checkout@127.0.0.1:${dbPort}/${TEST_DB_NAME}`;
-const MAINTENANCE_URL = TEST_DATABASE_URL.replace(/\/[^/]+$/, '/postgres');
+  process.env.DATABASE_URL_TEST ?? `postgres://checkout:checkout@127.0.0.1:${dbPort}/webcheckout_test`;
+
+/**
+ * The guard is on the database EFFECTIVELY connected, not on a constant: DATABASE_URL_TEST may
+ * point anywhere, and migrate/seed write before any truncate would have refused. The name comes
+ * from the parsed URL and is checked again server-side (current_database()) before any write.
+ */
+const parsed = new URL(TEST_DATABASE_URL);
+export const TEST_DB_NAME = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+if (!TEST_DB_NAME.endsWith('_test')) {
+  throw new Error(`refusing to run tests against "${TEST_DB_NAME}": the database name must end in _test (DATABASE_URL_TEST=${TEST_DATABASE_URL})`);
+}
+const maintenance = new URL(TEST_DATABASE_URL);
+maintenance.pathname = '/postgres';
+const MAINTENANCE_URL = maintenance.toString();
 
 export const silentLogger = createLogger('silent');
 
 /** Creates the test database if missing. Only ever touches a database whose name ends in _test. */
 export async function ensureTestDatabase(): Promise<void> {
-  if (!TEST_DB_NAME.endsWith('_test')) throw new Error('refusing: test database name must end in _test');
   const client = new pg.Client({ connectionString: MAINTENANCE_URL });
   await client.connect();
   try {
@@ -29,14 +40,16 @@ export function testPool(): Pool {
   return createPool(TEST_DATABASE_URL, silentLogger);
 }
 
-export async function migrateAndSeed(pool: Pool): Promise<void> {
-  await migrate(pool, silentLogger);
-  await seed(pool);
-}
-
 async function guard(pool: Pool): Promise<void> {
   const r = await pool.query<{ db: string }>('SELECT current_database() AS db');
   if (!r.rows[0]?.db.endsWith('_test')) throw new Error(`refusing to mutate non-test database ${r.rows[0]?.db}`);
+}
+
+/** Guarded like every other write: migrations and the seed change schema and data. */
+export async function migrateAndSeed(pool: Pool): Promise<void> {
+  await guard(pool);
+  await migrate(pool, silentLogger);
+  await seed(pool);
 }
 
 export async function truncateOrders(pool: Pool): Promise<void> {
