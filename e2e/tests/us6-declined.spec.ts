@@ -46,3 +46,33 @@ test('finding 2 (round five): Edit order after a decline, then re-confirm, is a 
   expect(delta(before, after, 'payment.executed.success')).toBe(1);
   expect(delta(before, after, 'orders.accepted')).toBe(2);
 });
+
+test('finding 3 (round six): a menu refresh that finishes on the payment screen with an item unavailable returns to the cart, flagged, and sends nothing', async ({ page }) => {
+  await page.goto('/');
+  await startAndAdd(page, [{ name: 'Coffee', times: 1 }, { name: 'Latte', times: 1 }]);
+  await goToPayment(page);
+  await choose(page, 'declined');
+  await pay(page);
+  await expect(page.locator('[data-screen="declined"]')).toBeVisible({ timeout: 15_000 });
+  // hold the refresh that Try again starts, then answer it with Coffee unavailable
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  await page.route('**/api/menu', async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { currency: string; items: { name: string; available: boolean }[] };
+    await gate;
+    try { await route.fulfill({ json: { ...body, items: body.items.map((i) => (i.name === 'Coffee' ? { ...i, available: false } : i)) } }); } catch { /* ignore */ }
+  }, { times: 1 });
+  const posts: string[] = [];
+  page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/api/orders')) posts.push(r.url()); });
+  await page.locator('[data-action="try-again"]').tap();
+  await expect(page.locator('[data-screen="review"]')).toBeVisible();
+  await page.getByRole('button', { name: 'Continue to payment' }).tap();
+  await expect(page.locator('[data-screen="payment"]')).toBeVisible();
+  release();
+  await expect(page.locator('[data-screen="menu"]')).toBeVisible();
+  await expect(page.locator('.line.flagged')).toHaveCount(1);
+  await expect(page.locator('[data-line]')).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Review order' })).toBeDisabled();
+  expect(posts).toHaveLength(0);
+});

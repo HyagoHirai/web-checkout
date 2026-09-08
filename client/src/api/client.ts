@@ -75,7 +75,14 @@ export function createApi(fetchImpl: Fetch = (...a) => fetch(...a)) {
     async lookupByKey(key: string, interactionId: string, signal?: AbortSignal): Promise<Classified> {
       try {
         const res = await fetchImpl(`/api/orders/by-key/${key}`, { headers: { accept: 'application/json', [INTERACTION_HEADER]: interactionId }, signal });
-        if (res.status === 404) return { category: 'unknown', reason: 'not found', notFound: true };
+        if (res.status === 404) {
+          // Only the API's own not_found body is "not found". An HTML 404 from a proxy, invalid JSON or a
+          // different error code is an unrecognised answer and proves nothing (contract classification).
+          let body: unknown = null;
+          try { body = await res.json(); } catch { body = null; }
+          const recognised = !!body && typeof body === 'object' && (body as { error?: unknown }).error === 'not_found';
+          return recognised ? { category: 'unknown', reason: 'not found', notFound: true } : { category: 'unknown', reason: 'unrecognised 404 body' };
+        }
         return await classify(res);
       } catch (e) {
         return { category: 'unknown', reason: `network: ${(e as Error).message}` };

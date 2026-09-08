@@ -69,8 +69,8 @@ export interface State {
   cart: Cart;
   rejection: Rejection | null;
   error: ErrorInfo | null;
-  /** A last check of a kept key is in flight (one at a time); the review's Continue is disabled meanwhile. */
-  checkingKey: boolean;
+  /** The identity of the last-check in flight, or null. Any navigation invalidates it; its continuation must match. */
+  activeCheck: number | null;
   now: number;
 }
 
@@ -100,9 +100,9 @@ export type Event =
   | { type: 'RESPONSE'; now: number; source: 'post' | 'poll' | 'lookup'; interactionId: string; idempotencyKey: string; result: Classified }
   | { type: 'TICK'; now: number }
   | { type: 'CONTINUE'; now: number }
-  | { type: 'CHECK_START'; now: number }
-  | { type: 'CHECK_END'; now: number }
-  | { type: 'CHECK_FAILED'; now: number }
+  | { type: 'CHECK_START'; now: number; checkId: number }
+  | { type: 'CHECK_END'; now: number; checkId: number }
+  | { type: 'CHECK_FAILED'; now: number; checkId: number }
   | { type: 'RETRY_AFTER_ERROR'; now: number }
   | { type: 'TRY_AGAIN'; now: number }
   | { type: 'START_NEW_ORDER'; now: number }

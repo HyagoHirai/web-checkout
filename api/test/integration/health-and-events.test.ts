@@ -33,3 +33,14 @@ describe('observability surface (constitution VI)', () => {
     expect(r.json().error).toBe('not_found');
   });
 });
+
+describe('round six, minor: a body that fails to parse is still counted as a rejected client event', () => {
+  it.each([
+    ['application/json', '{not json'],
+    ['text/plain;charset=UTF-8', '{not json'],
+  ] as const)('%s', async (type, body) => {
+    const r = await t.app.inject({ method: 'POST', url: '/api/events', headers: { 'content-type': type }, payload: body });
+    expect(r.statusCode).toBe(400);
+    expect((await metrics(t.app))['client_event.rejected']).toBe(1);
+  });
+});

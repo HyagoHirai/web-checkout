@@ -43,7 +43,7 @@ export function App({ runtime }: { runtime: Runtime }) {
     case 'building':
       switch (i.screen) {
         case 'review':
-          screen = <Review menu={state.menu} cart={state.cart} checking={state.checkingKey} onConfirm={a.goPayment} onBack={a.goMenu} onStartNew={a.startNewOrder} />;
+          screen = <Review menu={state.menu} cart={state.cart} checking={state.activeCheck !== null} onConfirm={a.goPayment} onBack={a.goMenu} onStartNew={a.startNewOrder} />;
           break;
         case 'payment':
           screen = (
@@ -66,7 +66,7 @@ export function App({ runtime }: { runtime: Runtime }) {
           break;
         case 'error':
           screen = state.error ? (
-            <ErrorScreen error={state.error} onTryAgain={a.retryAfterError} onStartNew={a.startNewOrder} />
+            <ErrorScreen error={state.error} hasKeptKey={i.submission !== null && i.submission.sentAt !== null && i.submission.knownState === 'none'} onTryAgain={a.retryAfterError} onStartNew={a.startNewOrder} />
           ) : (
             <Menu menu={state.menu} loading={state.menuLoading} cart={state.cart} onAdd={a.addItem} onSetQty={a.setQty} onRemove={a.removeItem} onReview={a.goReview} onStartNew={a.startNewOrder} />
           );

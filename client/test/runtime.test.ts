@@ -456,16 +456,158 @@ describe('review round five: the last check, declined keys, polling ownership, a
     rt.actions.goPayment();
     await vi.advanceTimersByTimeAsync(10);
     expect(releases).toHaveLength(1); // the second tap did not start a second check
-    expect(rt.getState().checkingKey).toBe(true);
+    expect(rt.getState().activeCheck).not.toBeNull();
     // the customer leaves the review while the check is in flight and edits the cart
     rt.actions.goMenu();
     rt.actions.addItem(LATTE.id);
     expect(rt.getState().interaction?.screen).toBe('menu');
     releases[0]();
     await vi.advanceTimersByTimeAsync(10);
-    expect(rt.getState().checkingKey).toBe(false);
+    expect(rt.getState().activeCheck).toBeNull();
     expect(rt.getState().interaction?.screen).toBe('menu'); // no navigation, no new key
     expect(rt.getState().interaction?.submission?.idempotencyKey).toBe(K1);
     expect(rt.getState().cart.lines).toHaveLength(2);
+  });
+});
+
+describe('review round six: unrecognised 404s, check identity, late menu updates, honest error copy', () => {
+  const rejected422 = () => json(422, { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: IID, currentTotalMinor: 800, currentItems: [{ ...COFFEE, priceMinor: 400 }], affectedItemIds: [COFFEE.id] });
+  const priced = () => MENU.map((m) => (m.id === COFFEE.id ? { ...m, priceMinor: 400 } : m));
+
+  async function rejectedThenReview() {
+    ff.setPost(rejected422);
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(10);
+    ff.setMenu(priced());
+    rt.actions.tryAgain();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('review');
+  }
+
+  it.each([
+    ['HTML 404', () => new Response('<html>Not Found</html>', { status: 404, headers: { 'content-type': 'text/html' } })],
+    ['invalid JSON 404', () => new Response('{oops', { status: 404, headers: { 'content-type': 'application/json' } })],
+    ['JSON 404 with another error', () => json(404, { error: 'route_missing' })],
+  ] as const)('finding 1: a 404 whose body is not the API\'s not_found (%s) keeps the key and starts nothing', async (_n, handler) => {
+    await rejectedThenReview();
+    ff.setGet(handler as Handler);
+    rt.actions.goPayment();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('error');
+    expect(rt.getState().error?.kind).toBe('lookup_failed');
+    expect(rt.getState().interaction?.submission?.idempotencyKey).toBe(K1);
+    expect(ff.posts()).toHaveLength(1);
+  });
+
+  it('finding 2: leaving the review invalidates the check even if the customer returns before it completes', async () => {
+    await rejectedThenReview();
+    let release!: () => void;
+    ff.setGet(() => new Promise<Response>((r) => { release = () => r(json(404, { error: 'not_found' })); }));
+    rt.actions.goPayment();
+    await vi.advanceTimersByTimeAsync(10);
+    rt.actions.goMenu();
+    rt.actions.addItem(LATTE.id);
+    rt.actions.goReview();
+    expect(rt.getState().interaction?.screen).toBe('review');
+    expect(rt.getState().activeCheck).toBeNull(); // the old check no longer belongs to this review
+    release();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('review'); // no automatic navigation
+    expect(rt.getState().interaction?.submission?.idempotencyKey).toBe(K1);
+    // a fresh tap performs its own check and then proceeds
+    ff.setGet(() => json(404, { error: 'not_found' }));
+    rt.actions.goPayment();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('payment');
+    expect(rt.getState().interaction?.submission?.idempotencyKey).toBe(K2);
+  });
+
+  it('finding 2: a check from an ended interaction completing later does not clear the next interaction\'s check', async () => {
+    await rejectedThenReview();
+    const releases: (() => void)[] = [];
+    ff.setGet(() => new Promise<Response>((r) => { releases.push(() => r(json(404, { error: 'not_found' }))); }));
+    rt.actions.goPayment(); // check A, held
+    await vi.advanceTimersByTimeAsync(10);
+    rt.actions.startNewOrder();
+    // interaction B goes through the same rejection and starts its own check
+    ff.setPost(rejected422);
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(10);
+    rt.actions.tryAgain();
+    await vi.advanceTimersByTimeAsync(10);
+    rt.actions.goPayment(); // check B, held
+    await vi.advanceTimersByTimeAsync(10);
+    expect(releases).toHaveLength(2);
+    expect(rt.getState().activeCheck).not.toBeNull();
+    releases[0](); // A completes
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().activeCheck).not.toBeNull(); // B's check is still the active one
+    expect(rt.getState().interaction?.screen).toBe('review');
+    rt.actions.goPayment(); // ignored: B's check is in flight
+    await vi.advanceTimersByTimeAsync(10);
+    expect(releases).toHaveLength(2);
+    releases[1]();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('payment');
+  });
+
+  it('finding 3: a late menu update that invalidates an unsent intent on the payment screen returns to the cart with the reason', async () => {
+    // the first menu load succeeds; the refresh after Try again is held until the test releases it
+    let releaseMenu!: () => void;
+    let menuCalls = 0;
+    const soldOut = MENU.map((m) => (m.id === COFFEE.id ? { ...m, available: false } : m));
+    const base = ff.impl;
+    const gated = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === '/api/menu') {
+        menuCalls += 1;
+        if (menuCalls === 1) return json(200, { currency: 'USD', items: MENU });
+        await new Promise<void>((r) => { releaseMenu = r; });
+        return json(200, { currency: 'USD', items: soldOut });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    rt.stop();
+    let n = 0;
+    rt = createRuntime({ api: createApi(gated), uuid: () => ids[n++ % ids.length], emit: () => {} });
+    rt.boot();
+    ff.setPost(() => json(201, orderStatus('failed')));
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.phase).toBe('declined');
+    rt.actions.tryAgain(); // menu refresh starts (held); review shown at once
+    expect(rt.getState().interaction?.screen).toBe('review');
+    rt.actions.goPayment();
+    expect(rt.getState().interaction?.screen).toBe('payment');
+    releaseMenu();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('menu');
+    expect(rt.getState().interaction?.submission).toBeNull();
+    expect(rt.getState().cart.flagged).toEqual([COFFEE.id]);
+    expect(rt.getState().cart.lines).toHaveLength(1); // the rest of the order is preserved
+    rt.actions.pay();
+    expect(ff.posts()).toHaveLength(1); // nothing invalid was sent
+  });
+
+  it('finding 4: a menu failure after a rejection keeps the key and does not claim nothing was charged', async () => {
+    ff.setPost(rejected422);
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(10);
+    const base = ff.impl;
+    const failing = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === '/api/menu') throw new TypeError('Failed to fetch');
+      return base(input, init);
+    }) as typeof fetch;
+    rt.stop();
+    rt = createRuntime({ api: createApi(failing), uuid: () => K2, emit: () => {} });
+    rt.boot();
+    rt.actions.tryAgain();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('error');
+    expect(rt.getState().error?.kind).toBe('menu_unreachable');
+    expect(rt.getState().interaction?.submission?.idempotencyKey).toBe(K1);
   });
 });

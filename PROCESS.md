@@ -132,6 +132,24 @@ Specific, because the point is what had to be noticed.
   because FR-009's re-confirmation must be possible and the owner ruled out per-intent
   coordination); anything else keeps the key, shows "we could not check your previous attempt",
   and lets the customer retry.
+- **The 404 exception was keyed on the status code, not on the recognised body.** Round five made
+  a `404` on the last check the one answer that permits a new key, but any HTTP 404 qualified,
+  including an HTML page from an intermediary. A sixth review reproduced the double payment with a
+  crafted HTML 404. Only the API's own `not_found` body qualifies now; anything else keeps the key.
+- **A check's identity was its screen and its object, and both could recur.** Leaving the review,
+  editing, and returning restored exactly the state the guard compared, so an old check completing
+  then could open the payment screen with an edited cart; and a check from an ended interaction
+  could clear the next interaction's in-flight flag. Every check now carries an id; any activity
+  event invalidates the active one; a completion whose id is no longer active touches nothing.
+- **A menu refresh could finish after the customer had moved past it.** After Try again the
+  refresh runs while the review is already shown; reaching the payment screen before it finished
+  left an unsent intent that a now-unavailable item made unsendable, with Pay enabled but inert.
+  A fresh menu now discards an unsent intent it invalidates and returns to the cart with the
+  reason, or to the review when only prices moved.
+- **The menu-failure screen said "nothing has been charged" while a rejected key was kept.** The
+  rejection screen's copy had been corrected in round four; the error screen reached from Review
+  again had not. The error screen now says the previous attempt has not been checked whenever a
+  sent key with an unknown outcome is kept.
 - **The kept-key rule kept declined keys too.** "Edit order" after a decline carried the failed key
   into editing; confirming again looked it up, found `failed`, and showed the old decline instead of
   a new payment. A key is now kept only while its outcome is unknown; a decline is terminal for that
@@ -243,6 +261,14 @@ volume path that the verifier had already corrected; three incompatible test-run
 incompatible TypeScript execution models; `format: uuid` in the contract versus a strict pattern in
 the research; the interaction id in the body in one document and in a header in another. All
 refinements, resolved by reconciliation.
+
+**Round six** (the same external agent, on commit `8a9573a`) found one high and three medium
+defects, all reproduced and fixed with regressions: an unrecognised 404 body releasing a new key;
+check identity by screen and object rather than by id; a late menu refresh stranding an unsent
+intent on the payment screen; error copy asserting no charge while a key was kept. Two minor
+items were applied as well: a client event whose body fails to parse is now counted as rejected,
+and the `404` exception was carried into its owning documents, ADR-002 and FR-024, dated and
+marked for the owner to confirm.
 
 **Round five** (the same external agent, on commit `1a5114e`) found two high and two medium
 defects in the runtime, all reproduced: the last check releasing a new key on a transport failure;

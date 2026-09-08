@@ -85,6 +85,8 @@ The first response can be lost. If it is, the client never receives the server-g
 
 A lookup that returns "not found" does **not** mean the submission failed. It may still be in the write window. The client preserves the uncertainty and the identity; it does not generate a new key.
 
+*(Amended 2026-09-08, review round six.)* One explicit exception: when a submission was **rejected by validation** (422) and the customer confirms again, the client checks the rejected key once more, and a "not found" on that check, recognised as this API's own `not_found` body, permits a new key. Without it a rejected submission could never be re-confirmed, and per-intent coordination is ruled out above. That "not found" does not prove absence of effects (see "The validation window"); any other answer to that check keeps the key and permits nothing.
+
 The human-readable order reference shown at confirmation is a separate, shorter identifier returned in the response. It is for quoting at the counter, not for recovery, and the lookup endpoint must not expose one order's data to a caller holding a different order's reference.
 
 **What is not promised:** if *all* client identifiers are lost — storage cleared, different device, interaction expired — there is no automatic individual recovery. The order still exists server-side if it was accepted, but the system has no correlation to offer. This is stated rather than hidden.

@@ -84,6 +84,11 @@ once, briefly. May abandon at any point. There is no second user role in scope.
   server cases in User Story 4.
 - Q (plan review): What exactly does "at most one payment" promise? → A: At most one order per
   intent, exactly one where acceptance occurred, and the simulator called at most once per intent.
+- Q (review round six): How does the "not found" rule reconcile with re-confirmation after a
+  rejection? → A: Applied for consistency with the owner's earlier decisions (re-confirmation per
+  FR-009; no per-intent coordination per ADR-002): a recognised "not found" on the check made at
+  re-confirmation permits a new intent; anything else keeps the key. Recorded in ADR-002 and FR-024;
+  owner to confirm.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -453,6 +458,10 @@ stays.
   counter will find anything (ADR-005).
 - **FR-024**: A generic server error, or a failed status lookup, MUST be treated as unknown —
   never as a known decline, and never as permission to start a new payment for the same items.
+  One exception, decided with ADR-002 (amended 2026-09-08): after a submission was rejected before
+  payment, the re-confirmation the customer makes first checks the rejected key, and a "not found"
+  recognised as the service's own answer permits a new intent; any other answer to that check keeps
+  the key and permits nothing.
 - **FR-025**: What the customer's screen shows MUST be kept separate from what exists server-side.
   A client-side timeout on its own confirms neither acceptance nor rejection; if the order was
   accepted, its record remains, unresolved.

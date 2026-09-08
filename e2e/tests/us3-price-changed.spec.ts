@@ -112,3 +112,30 @@ test('finding 1 (round five): when the last check of a rejected key fails, no ne
   expect(delta(before, after, 'orders.accepted')).toBe(1);
   expect(delta(before, after, 'payment.executed.success')).toBe(1);
 });
+
+test('finding 1 (round six): a 404 that is not the API\'s not_found body keeps the key and starts nothing', async ({ page }) => {
+  const before = await metrics(page);
+  await page.goto('/');
+  await startAndAdd(page, [{ name: 'Coffee', times: 2 }]);
+  await goToPayment(page);
+  await page.route('**/api/orders', async (route) => {
+    const res = await route.fetch(); // the server accepts and pays K1
+    await res.json();
+    await route.fulfill({ status: 422, json: { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: 'x', currentTotalMinor: 800, currentItems: [], affectedItemIds: [] } });
+  }, { times: 1 });
+  await choose(page, 'success');
+  await pay(page);
+  await expect(page.locator('[data-screen="rejected"]')).toBeVisible();
+  await page.locator('[data-action="review-again"]').tap();
+  // an HTML 404 from an intermediary answers the last check
+  await page.route('**/api/orders/by-key/**', (route) => route.fulfill({ status: 404, contentType: 'text/html', body: '<html><body>Not Found</body></html>' }), { times: 1 });
+  await page.getByRole('button', { name: 'Continue to payment' }).tap();
+  await expect(page.locator('[data-screen="error"]')).toBeVisible();
+  await expect(page.locator('[data-screen="payment"]')).toHaveCount(0);
+  await expect(page.getByText('previous attempt has not been checked')).toBeVisible();
+  await page.locator('[data-action="try-again"]').tap();
+  await page.getByRole('button', { name: 'Continue to payment' }).tap();
+  await expect(page.locator('[data-screen="confirmed"]')).toBeVisible({ timeout: 10_000 });
+  const after = await metrics(page);
+  expect(delta(before, after, 'orders.accepted')).toBe(1);
+});

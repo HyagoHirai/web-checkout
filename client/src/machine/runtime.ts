@@ -36,6 +36,7 @@ export function createRuntime(opts: RuntimeOptions = {}) {
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   /** The interaction/key pair the current polling loop belongs to; polling follows the key, not the phase. */
   let pollingFor: { interactionId: string; key: string } | null = null;
+  let checkSeq = 0;
   const onPageShow = () => revalidate();
   const onVisibility = () => { if (document.visibilityState === 'visible') revalidate(); };
 
@@ -261,25 +262,27 @@ export function createRuntime(opts: RuntimeOptions = {}) {
         //   outcome   → the recorded state is applied;
         //   404       → the one case where "not found" permits a new intent (FR-009 must be possible);
         //   anything else (network, 5xx, unrecognised body) → nothing is known, nothing new starts.
+        const checkId = ++checkSeq;
         const before = state;
-        const after = dispatch({ type: 'CHECK_START', now: now() });
+        const after = dispatch({ type: 'CHECK_START', now: now(), checkId });
         if (after === before) return; // a check is already in flight, or the screen is not the review
         const interactionId = i.id;
         const key = kept.idempotencyKey;
         void api.lookupByKey(key, interactionId).then((result) => {
-          dispatch({ type: 'CHECK_END', now: now() });
-          const cur = state.interaction;
-          const stillCurrent = cur && cur.id === interactionId && cur.phase === 'building' && cur.screen === 'review' && cur.submission === kept;
+          // Identity first: a check abandoned by any navigation, or belonging to an ended interaction,
+          // is dropped entirely and touches nothing (not even another check's flag).
+          if (state.activeCheck !== checkId) return;
           if (result.category === 'outcome') {
-            if (stillCurrent) admit({ source: 'lookup', interactionId, idempotencyKey: key, result });
+            dispatch({ type: 'CHECK_END', now: now(), checkId });
+            admit({ source: 'lookup', interactionId, idempotencyKey: key, result });
             return;
           }
-          if (!stillCurrent) return;
           if (result.category === 'unknown' && result.notFound) {
+            dispatch({ type: 'CHECK_END', now: now(), checkId });
             dispatch({ type: 'GO_PAYMENT', now: now(), idempotencyKey: uuid() });
             return;
           }
-          dispatch({ type: 'CHECK_FAILED', now: now() });
+          dispatch({ type: 'CHECK_FAILED', now: now(), checkId });
         });
       },
       backToCart: () => dispatch({ type: 'BACK_TO_CART', now: now() }),

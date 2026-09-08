@@ -10,7 +10,7 @@ export const initialState: State = {
   cart: { lines: [], flagged: [] },
   rejection: null,
   error: null,
-  checkingKey: false,
+  activeCheck: null,
   now: 0,
 };
 
@@ -248,26 +248,44 @@ export function reduce(state: State, ev: Event): State {
   if (!i) return state;
   if (isExpired(i, now)) return toIdle(state, now);
 
-  // The last check of a kept key: one at a time, from the review screen only.
+  // The last check of a kept key: one at a time, from the review screen only, identified so that a
+  // check abandoned by navigation (even if the customer returns) or belonging to an ended interaction
+  // can never be admitted. Every activity event below clears the active check.
   if (ev.type === 'CHECK_START') {
-    if (state.checkingKey || !checkStillCurrent(i)) return state;
-    return { ...state, now, checkingKey: true };
+    if (state.activeCheck !== null || !checkStillCurrent(i)) return state;
+    return { ...state, now, activeCheck: ev.checkId };
   }
-  if (ev.type === 'CHECK_END') return state.checkingKey ? { ...state, now, checkingKey: false } : state;
+  if (ev.type === 'CHECK_END') return state.activeCheck === ev.checkId ? { ...state, now, activeCheck: null } : state;
   if (ev.type === 'CHECK_FAILED') {
+    if (state.activeCheck !== ev.checkId) return state;
     // transport failure, 5xx or an unrecognised body: nothing is known, nothing new is started (FR-024)
-    if (!checkStillCurrent(i)) return { ...state, now, checkingKey: false };
-    return { ...state, now, checkingKey: false, error: { kind: 'lookup_failed' }, interaction: { ...i, screen: 'error' } };
+    return { ...state, now, activeCheck: null, error: { kind: 'lookup_failed' }, interaction: { ...i, screen: 'error' } };
   }
 
   const active = ACTIVITY.has(ev.type) ? stamp(i, now) : i;
+  if (ACTIVITY.has(ev.type) && state.activeCheck !== null) state = { ...state, activeCheck: null };
 
   switch (ev.type) {
     case 'MENU_LOADED': {
       const cart = reflag(state.cart, ev.items);
-      // a line flagged by a fresh menu must be acted on: leave review for the menu (FR-010)
-      const screen = cart.flagged.length > 0 && i.phase === 'building' && i.screen === 'review' ? 'menu' : active.screen;
-      return { ...state, now, menu: ev.items, menuLoading: false, cart, interaction: { ...active, screen } };
+      let screen = active.screen;
+      let submission = active.submission;
+      if (i.phase === 'building' && (i.screen === 'review' || i.screen === 'payment')) {
+        const unsent = i.submission !== null && i.submission.sentAt === null ? i.submission : null;
+        const byId = new Map(ev.items.map((m) => [m.id, m]));
+        const repriced = unsent !== null && unsent.lines.some((l) => byId.get(l.itemId)?.priceMinor !== l.unitPriceMinor);
+        if (cartBlocker(cart, ev.items) !== null) {
+          // a line is flagged or a bound is exceeded: back to the cart with the reason; an unsent intent is discarded (FR-010, FR-006)
+          screen = 'menu';
+          submission = keptIntent(i);
+        } else if (repriced) {
+          // the frozen prices are stale: back to the review so the new total is seen before it is frozen again (FR-008)
+          screen = 'review';
+          submission = keptIntent(i);
+        }
+      }
+      const left = screen !== i.screen;
+      return { ...state, now, menu: ev.items, menuLoading: false, cart, activeCheck: left ? null : state.activeCheck, interaction: { ...active, screen, submission } };
     }
     case 'MENU_FAILED':
       if (i.phase !== 'building') return state;

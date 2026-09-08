@@ -1,3 +1,4 @@
+import type { FastifyError } from 'fastify';
 import type { App } from '../app.ts';
 import { UUID_PATTERN_SOURCE } from '../../../shared/constants.ts';
 import { CLIENT_EVENT_NAMES, type ClientEvent } from '../../../shared/wire.ts';
@@ -26,6 +27,17 @@ const schema = {
  */
 export async function eventsRoutes(app: App): Promise<void> {
   app.addContentTypeParser('text/plain', { parseAs: 'string', bodyLimit: 4096 }, app.getDefaultJsonParser('ignore', 'ignore'));
+
+  // A body that fails to parse never reaches the handler; it is still a rejected client event.
+  app.setErrorHandler((err: FastifyError, request, reply) => {
+    if (err.statusCode === 400) {
+      app.counters.inc('client_event.rejected');
+      request.log.info({ event: 'client.event_rejected', message: err.message }, 'client event rejected');
+      reply.code(400).send({ error: 'bad_request', requestId: request.id });
+      return;
+    }
+    reply.send(err);
+  });
 
   app.post<{ Body: ClientEvent }>(
     '/api/events',
