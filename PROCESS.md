@@ -148,6 +148,37 @@ document was amended first or in the same commit.
 
 ---
 
+## A deliberate UI pass for the kiosk context
+
+After the functional work was green, the owner reviewed the screens at the real target
+(1024×768, touch) and asked for a presentation-only pass: no state machine, timer, request or
+validation changes, and no test assertion about behaviour to move. Everything was checked at the
+real size before and after, which mattered: at kiosk height the menu's "Review order" footer was
+below the fold entirely, something the owner's taller screenshots had not shown.
+
+What changed: every tappable control is at least 56×56 px (the `+`/`−` and Add controls were
+about 40); cart lines are two rows so "Remove" no longer overflows the panel and is a quiet button
+rather than the loudest text on the screen; menu cards put the name on top with room to wrap and
+are a uniform height, with unavailable items listed last in a shorter card that carries no
+button; the review, payment and processing screens centre their content instead of stranding it
+in the top third; the idle screen is one grouped block slightly above the middle; "Review order"
+sits under the total inside the order panel, which stays put while the menu scrolls; the payment
+screen's hierarchy is title, amount, a one-line simulation notice, the selector as secondary, then
+Pay; the processing screen lost a disabled "Paying…" button that offered no action; and the
+default focus ring is suppressed for touch while keyboard focus stays visible.
+
+One label misdescribed its action: the review screen's "Confirm and pay $X" opened another screen
+with its own Pay button. It now reads "Continue to payment", and "Pay $X" is reserved for the
+control that actually starts the operation. Five test selectors changed to match the two label
+changes (four for the new label, one because the unavailable card no longer has an Add control to
+assert as disabled; it now asserts that no Add control exists). No behavioural assertion moved.
+
+Scope note: a production kiosk would show product photography, since that is what drives
+selection. It is omitted here as asset work rather than engineering, and outside what the brief
+asks for.
+
+---
+
 ## What I threw away
 
 - The `order_items` table from the first data model, in favour of a JSONB snapshot (recorded in

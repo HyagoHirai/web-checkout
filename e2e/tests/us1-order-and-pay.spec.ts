@@ -19,8 +19,9 @@ test.describe('US1: order and pay at the kiosk', () => {
     await expect(page.locator('[data-line]')).toHaveCount(1);
     await expect(page.locator('[data-total]')).toHaveText('$7.00');
 
-    // an unavailable item cannot be added (FR-003)
-    await expect(page.getByRole('button', { name: 'Add Soup of the day' })).toBeDisabled();
+    // an unavailable item cannot be added (FR-003): it is listed, labelled, and carries no Add control
+    await expect(page.getByRole('button', { name: 'Add Soup of the day' })).toHaveCount(0);
+    await expect(page.locator('.item.unavailable', { hasText: 'Soup of the day' })).toContainText('Unavailable');
 
     // an eleventh of one item is refused (FR-006)
     for (let i = 0; i < 8; i += 1) await page.getByRole('button', { name: 'More Coffee' }).tap();

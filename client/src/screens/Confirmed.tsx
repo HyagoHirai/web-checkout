@@ -4,7 +4,7 @@ export function Confirmed({ reference, totalMinor, onDone }: { reference: string
   return (
     <div className="screen" data-screen="confirmed">
       <header className="topbar"><h1>Thank you</h1></header>
-      <div className="content">
+      <div className="content center">
         <div className="card" style={{ textAlign: 'center' }}>
           <h2>Payment confirmed, {formatMinor(totalMinor)}</h2>
           <p>Your order reference is</p>

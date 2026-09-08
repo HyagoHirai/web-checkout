@@ -75,6 +75,8 @@ Structured logs and simple counters on the paths that can fail. Nobody reports a
 
 **Multi-language and accessibility beyond the basics.** A genuine gap for a public terminal, not a scoping choice.
 
+**Product photography.** *(Added 2026-09-07 at the owner's instruction, UI pass.)* A production kiosk would show it, since that is what drives selection. Omitted here as asset work rather than engineering, and outside what the brief asks for.
+
 ## Possible future direction
 
 *Not requirements of this delivery. These generate no tasks.*

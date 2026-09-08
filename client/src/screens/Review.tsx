@@ -20,7 +20,7 @@ export function Review({ menu, cart, onConfirm, onBack, onStartNew }: Props) {
         <h1>Review your order</h1>
         <button className="quiet" onClick={onStartNew}>Start new order</button>
       </header>
-      <div className="content">
+      <div className="content center">
         <div className="card">
           {cart.lines.map((l) => {
             const m = byId.get(l.itemId);
@@ -36,13 +36,13 @@ export function Review({ menu, cart, onConfirm, onBack, onStartNew }: Props) {
             <span>Total to pay</span>
             <span data-total>{formatMinor(total)}</span>
           </div>
-          <p className="hint">This is the amount you will be charged. Tap Confirm and pay to continue.</p>
+          <p className="hint">This is the amount you will be charged. Continue to payment when you are ready.</p>
         </div>
       </div>
       <footer className="actions">
         <button onClick={onBack}>Back</button>
         <span className="spacer" />
-        <button className="primary" onClick={onConfirm}>Confirm and pay {formatMinor(total)}</button>
+        <button className="primary" onClick={onConfirm}>Continue to payment</button>
       </footer>
     </div>
   );

@@ -10,7 +10,7 @@ export function Unresolved({ knownState, reference, onStartNew }: Props) {
   return (
     <div className="screen" data-screen={known ? 'unresolved-known' : 'unresolved-unknown'}>
       <header className="topbar"><h1>Payment not confirmed</h1></header>
-      <div className="content">
+      <div className="content center">
         <div className="card">
           {known ? (
             <>

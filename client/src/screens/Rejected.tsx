@@ -31,7 +31,7 @@ export function Rejected({ rejection, menu, cart, onReviewAgain, onStartNew }: P
         <h1>Please check your order</h1>
         <button className="quiet" onClick={onStartNew}>Start new order</button>
       </header>
-      <div className="content">
+      <div className="content center">
         <div className="card">
           <div className="notice warn" role="alert">This attempt was not accepted. {rejection.reasons.map((r) => COPY[r] ?? r).join(' ')}</div>
           {rejection.affectedItemIds.map((id) => {

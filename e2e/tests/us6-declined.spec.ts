@@ -13,7 +13,7 @@ test('US6: a decline keeps the items; trying again is a new order; the first sta
   await expect(page.locator('[data-screen="declined"] .review-line')).toHaveCount(2);
   await page.locator('[data-action="try-again"]').tap();
   await expect(page.locator('[data-screen="review"]')).toBeVisible();
-  await page.getByRole('button', { name: /Confirm and pay/ }).tap();
+  await page.getByRole('button', { name: 'Continue to payment' }).tap();
   await choose(page, 'success');
   await pay(page);
   await expect(page.locator('[data-screen="confirmed"]')).toBeVisible({ timeout: 15_000 });

@@ -23,7 +23,7 @@ export async function startAndAdd(page: Page, items: { name: string; times: numb
 export async function goToPayment(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Review order' }).tap();
   await expect(page.locator('[data-screen="review"]')).toBeVisible();
-  await page.getByRole('button', { name: /Confirm and pay/ }).tap();
+  await page.getByRole('button', { name: 'Continue to payment' }).tap();
   await expect(page.locator('[data-screen="payment"]')).toBeVisible();
 }
 

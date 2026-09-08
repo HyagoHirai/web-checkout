@@ -11,7 +11,7 @@ export function ErrorScreen({ error, onTryAgain, onStartNew }: { error: ErrorInf
   return (
     <div className="screen" data-screen="error">
       <header className="topbar"><h1>{c.title}</h1></header>
-      <div className="content">
+      <div className="content center">
         <div className="card">
           <div className="notice bad" role="alert">{c.body}</div>
           <p className="hint">Tap Try again to retry, or Start new order to begin from the start.</p>

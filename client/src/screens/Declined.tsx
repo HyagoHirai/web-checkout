@@ -16,7 +16,7 @@ export function Declined({ lines, totalMinor, onTryAgain, onEdit, onStartNew }: 
         <h1>Payment declined</h1>
         <button className="quiet" onClick={onStartNew}>Start new order</button>
       </header>
-      <div className="content">
+      <div className="content center">
         <div className="card">
           <div className="notice bad" role="alert">The card terminal declined the payment. Nothing was charged. Your items are still here.</div>
           {lines.map((l) => (

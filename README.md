@@ -87,7 +87,8 @@ real orders). "At most one payment per intent" is asserted on the simulator's ca
 Real payment processing, accounts, menu administration, fulfilment, cancellation after
 confirmation, promotions, counted inventory, receipts and hardware, reconciliation of orders left
 in an unknown state, any staff-facing interface (ADR-001). Orders left in `pending_payment` stay
-there; the customer's route is the counter.
+there; the customer's route is the counter. Product photography, which is what drives selection on
+a real kiosk, is omitted as asset work rather than engineering.
 
 One residual window is recorded rather than closed: two concurrent requests with the same key and
 a menu change landing between their validations can leave one told "rejected" while the other

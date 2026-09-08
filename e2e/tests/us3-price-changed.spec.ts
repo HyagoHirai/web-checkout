@@ -21,7 +21,7 @@ test('US3: a price change that moves the total is rejected before payment; re-co
     await page.locator('[data-action="review-again"]').tap();
     await expect(page.locator('[data-screen="review"]')).toBeVisible();
     await expect(page.locator('[data-screen="review"] [data-total]')).toHaveText('$8.00');
-    await page.getByRole('button', { name: /Confirm and pay/ }).tap();
+    await page.getByRole('button', { name: 'Continue to payment' }).tap();
     await expect(page.locator('[data-screen="payment"] [data-total]')).toHaveText('$8.00');
     await choose(page, 'success');
     await pay(page);
@@ -72,7 +72,7 @@ test('finding 2: after a rejection, confirming again first checks the rejected k
   await expect(page.getByText('This attempt was not accepted')).toBeVisible();
   await page.locator('[data-action="review-again"]').tap();
   await expect(page.locator('[data-screen="review"]')).toBeVisible();
-  await page.getByRole('button', { name: /Confirm and pay/ }).tap();
+  await page.getByRole('button', { name: 'Continue to payment' }).tap();
   // the last check finds K1 paid: the recorded order is shown; no second key, no second payment
   await expect(page.locator('[data-screen="confirmed"]')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Payment confirmed, $7.00')).toBeVisible();
