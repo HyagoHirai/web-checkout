@@ -300,8 +300,13 @@ high defect (a late rejection erasing a known acceptance), four medium ones (a s
 flag; the ops script able to start the demo stack; bounded decrements; limits explained only in a
 tooltip) and one low (the pool error counter unwired in production). All reproduced and fixed with
 regressions; the UI contract's unresolved deadline and the OpenAPI `OrderLine` schema were aligned
-with the code. Still pending the owner's word: the 404-at-re-confirmation exception in ADR-002 and
-FR-024, and FR-009's "no order for a rejected submission" wording.
+with the code. The two items that had waited for the owner were then decided on 2026-09-08: the
+404-at-re-confirmation exception confirmed with its narrow scope, and FR-009 reworded from "no
+order for a rejected submission" to "no order is created by a rejected request", the owner naming
+the earlier wording as the same overreach as the "closes the write-window race" claim: a statement
+about the intent when the mechanism only guarantees something about the request. At the owner's
+instruction ADR-002's "Where this still breaks" now also records that the re-confirmation check
+narrows the window rather than closing it, so the exception cannot read as a fix.
 
 **Round six** (the same external agent, on commit `8a9573a`) found one high and three medium
 defects, all reproduced and fixed with regressions: an unrecognised 404 body releasing a new key;
