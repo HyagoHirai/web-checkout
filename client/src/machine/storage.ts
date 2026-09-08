@@ -16,6 +16,20 @@ export function clear(): void {
   save(null);
 }
 
+/** The raw stored record, or `undefined` when storage itself is unavailable (private window, blocked). */
+export function readRaw(): string | null | undefined {
+  try {
+    return sessionStorage.getItem(KEY);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether an in-memory interaction is still the tab's current record, byte for byte. */
+export function isCurrent(i: Interaction, raw: string | null): boolean {
+  return raw !== null && raw === JSON.stringify(i);
+}
+
 const PHASES = new Set(['idle', 'building', 'submitted', 'confirmed', 'declined', 'unresolved']);
 const SCREENS = new Set(['menu', 'review', 'payment', 'rejected', 'error']);
 const KNOWN = new Set(['none', 'pending', 'paid', 'failed']);
@@ -36,7 +50,7 @@ function validSubmission(s: unknown): boolean {
   if (!o || typeof o !== 'object') return false;
   if (!isStr(o.idempotencyKey) || !UUID.test(o.idempotencyKey)) return false;
   if (!Array.isArray(o.lines) || !o.lines.every(validLine)) return false;
-  if (!isNum(o.expectedTotalMinor) || !isNumOrNull(o.sentAt) || !isNumOrNull(o.pollStartedAt)) return false;
+  if (!isNum(o.expectedTotalMinor) || !isNumOrNull(o.sentAt) || !isNumOrNull(o.pollStartedAt) || !isNumOrNull(o.recordedTotalMinor)) return false;
   if (!KNOWN.has(o.knownState as string) || !OUTCOMES.has(o.simulation as string)) return false;
   if (o.reference !== null && !isStr(o.reference)) return false;
   return true;

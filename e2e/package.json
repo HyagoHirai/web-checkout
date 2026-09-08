@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Interface tests (Chrome 1024x768, touch) and operational acceptance for Web Checkout.",
   "scripts": {
-    "test:e2e": "playwright test --project kiosk",
+    "test:e2e": "playwright test --project kiosk --project kiosk-bfcache",
     "test:ops": "playwright test --project ops",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

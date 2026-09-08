@@ -128,6 +128,7 @@ scenario 3). Seeded ids are fixed lowercase UUIDs so tests can reference them.
 | `deadlineAt` | epoch ms \| null | The inactivity deadline carried across `unresolved → declined` by a late result (see Deadline preservation) |
 | `knownState` | `none` \| `pending` \| `paid` \| `failed` | The most definite thing any response has established. Drives the unresolved screen's wording (FR-023). Moves only forward |
 | `reference` | string \| null | Set when a response carries it |
+| `recordedTotalMinor` | integer \| null | The total of the order the server holds for this key, set with any outcome; shown on S5/S6 instead of `expectedTotalMinor`, which is what this attempt sent |
 | `simulation` | `success` \| `declined` \| `inconclusive` | The selector on the simulated payment screen (research R9); sent in the POST body; not part of the fingerprint; ignored by the server on replay |
 
 Validity on load, on `pageshow`, and on `visibilitychange → visible` (research R4): the record is
@@ -192,8 +193,14 @@ Guards:
 - A second tap on Pay while `submitted` is ignored; the client never re-sends on its own. A network
   rejection before the 8 s wait ends starts polling by key immediately (research R10).
 - A `409 intent_mismatch` (unreachable from this client, which re-sends the persisted `lines`)
-  triggers a status lookup by key and shows the recorded state; it never shows a rejection for an
-  order that may be paid.
+  triggers a status lookup by key and shows the recorded state and total; it never shows a
+  rejection for an order that may be paid.
+- A `422` keeps the sent key (it can never be re-sent) while the customer edits and re-confirms;
+  GO_PAYMENT first looks that key up once more and applies a recorded outcome if there is one
+  (ADR-002 "The validation window"). `canReview` validates the whole cart, including bounds after
+  a re-pricing (FR-006).
+- A document restored from the back/forward cache adopts the tab's stored record if its memory is
+  no longer current (another document reset, started a new interaction, or moved to a new attempt).
 - Leaving `declined` to `building` keeps the cart and discards the key; entering payment generates a
   new key (new intent).
 

@@ -107,6 +107,27 @@ Specific, because the point is what had to be noticed.
   rule; hydration by phase; a live-page revalidation that only applies the clock; a union-typed
   storage validator with a format version; a guard on `current_database()` before every write;
   and 20 new tests whose clock jumps rather than ticks.
+- **My fix for the tab-switch defect created the next one.** Making a live page apply only the
+  clock on `pageshow` meant a document restored from the back/forward cache never asked whether it
+  was still the tab's current interaction. Another document in the same tab could reset and start a
+  new interaction; going back restored the old cart. A fourth review caught it, and caught why my
+  navigation tests had not: Playwright's default headless shell never restores from the bfcache and
+  Playwright passes `--disable-back-forward-cache`, so every "back" in my tests was a fresh load.
+  Fixed by comparing the in-memory record with the stored one byte for byte on `pageshow` and
+  visibility; tested in a separate Playwright project on the full Chromium channel without the
+  flag, asserting `pageshow.persisted === true`.
+- **A 422 was presented as proof about the whole intent.** The client said "Nothing has been
+  charged" and discarded the key on a rejection, while ADR-002 records that a concurrent request
+  with the same key may still be accepted. The reviewer reproduced the double payment against a real
+  Postgres with a barrier. The owner had ruled out a lock; the fix keeps the rejected key (it can
+  never be re-sent), softens the copy to "this attempt was not accepted", and performs one lookup of
+  the kept key when the customer confirms again, before a new key exists. That narrows the window
+  from milliseconds to the customer's reaction time without coordination. It is still not a proof.
+- **Bounds were checked on quantity changes only.** A re-pricing after a rejection could push a
+  valid cart over $1,000.00 and the client would still freeze and send it (the server refused it).
+  `canReview` now validates the whole cart.
+- **A 409 recovery showed the conflicting attempt's total.** The confirmation used what this attempt
+  sent, not what the server recorded. The recorded total now travels with the outcome.
 
 ---
 
@@ -170,6 +191,15 @@ volume path that the verifier had already corrected; three incompatible test-run
 incompatible TypeScript execution models; `format: uuid` in the contract versus a strict pattern in
 the research; the interaction id in the body in one document and in a header in another. All
 refinements, resolved by reconciliation.
+
+**Round four** (the same external agent, on commit `122aade`) found one critical, one high and two
+medium defects, all reproduced: the bfcache restore of an ended interaction; a rejection treated as
+proof about the whole intent; bounds not re-checked after a re-pricing; a 409 recovery showing the
+wrong total. All fixed with regressions, the bfcache ones with `persisted === true` asserted. The
+contract and UI contract now state what a 422 does and does not prove. One document conflict
+remains for the owner: FR-009 says "No order MUST be created for a rejected submission", which
+ADR-002 (higher precedence) qualifies to "by a rejected request"; the spec's sentence was not
+edited by the agent.
 
 **Round three** (by another agent, on the implemented code, after the owner's "no further
 review round" on the documents) found the seven suspension-and-reload defects listed under "Where

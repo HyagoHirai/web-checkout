@@ -34,10 +34,10 @@ describe('US1: cart rules (FR-002..FR-006)', () => {
     expect(s.cart.lines.find((l) => l.itemId === PRICEY.id)?.quantity).toBe(4);
   });
   it('review is blocked on an empty cart and on a flagged line', () => {
-    expect(canReview(started.cart)).toBe(false);
+    expect(canReview(started.cart, MENU)).toBe(false);
     const s = reduce(reduce(started, { type: 'ADD_ITEM', now: t, itemId: COFFEE.id }), { type: 'GO_REVIEW', now: t });
     expect(interactionOf(s).screen).toBe('review');
-    expect(canReview({ lines: [{ itemId: COFFEE.id, quantity: 1 }], flagged: [COFFEE.id] })).toBe(false);
+    expect(canReview({ lines: [{ itemId: COFFEE.id, quantity: 1 }], flagged: [COFFEE.id] }, MENU)).toBe(false);
   });
   it('entering payment freezes the lines and the review total as expectedTotalMinor (FR-008)', () => {
     const s = atPayment(t);
@@ -81,13 +81,14 @@ describe('US2: the intent is frozen from first send (ADR-002)', () => {
 });
 
 describe('US3/US7: rejection before payment (FR-009, FR-010)', () => {
-  it('price_mismatch re-prices the menu, discards the key, and the next payment carries the new total', () => {
+  it('price_mismatch re-prices the menu, keeps the rejected key for a last check, and the next payment carries the new total under a new key', () => {
     const s = reduce(submitted(t), {
       type: 'RESPONSE', now: t + 1, source: 'post', interactionId: IID, idempotencyKey: K1,
       result: { category: 'rejected', rejection: { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: IID, currentTotalMinor: 800, currentItems: [{ ...COFFEE, priceMinor: 400 }], affectedItemIds: [COFFEE.id] } },
     });
     expect(interactionOf(s).screen).toBe('rejected');
-    expect(interactionOf(s).submission).toBeNull();
+    expect(interactionOf(s).submission?.idempotencyKey).toBe(K1); // kept (ADR-002 "The validation window")
+    expect(reduce(s, { type: 'PAY', now: t + 1 })).toBe(s); // but it can never be re-sent
     expect(s.rejection?.reasons).toEqual(['price_mismatch']);
     expect(cartTotalMinor(s.cart, s.menu)).toBe(800);
     const again = run([{ type: 'TRY_AGAIN', now: t + 2 }, { type: 'GO_PAYMENT', now: t + 3, idempotencyKey: K2 }], s);
@@ -100,11 +101,11 @@ describe('US3/US7: rejection before payment (FR-009, FR-010)', () => {
       result: { category: 'rejected', rejection: { error: 'validation_rejected', reasons: ['item_unavailable'], interactionId: IID, currentItems: [{ ...COFFEE, available: false }], affectedItemIds: [COFFEE.id] } },
     });
     expect(s.cart.flagged).toEqual([COFFEE.id]);
-    expect(canReview(s.cart)).toBe(false);
+    expect(canReview(s.cart, MENU)).toBe(false);
     const removed = reduce(s, { type: 'REMOVE_ITEM', now: t + 2, itemId: COFFEE.id });
     expect(removed.cart.flagged).toEqual([]);
     expect(removed.cart.lines).toHaveLength(0);
-    expect(canReview(removed.cart)).toBe(false); // empty now
+    expect(canReview(removed.cart, MENU)).toBe(false); // empty now
   });
 });
 

@@ -1,7 +1,7 @@
 import type { MenuItem } from '../../../shared/wire.ts';
 import { MAX_QTY_PER_LINE, MAX_UNITS_PER_ORDER, MAX_TOTAL_MINOR } from '../../../shared/constants.ts';
 import { formatMinor } from '../money/format.ts';
-import { canReview, cartChangeBlocker, cartTotalMinor } from '../machine/reducer.ts';
+import { cartBlocker, cartChangeBlocker, cartTotalMinor } from '../machine/reducer.ts';
 import type { Cart } from '../machine/types.ts';
 
 interface Props {
@@ -26,7 +26,8 @@ export function Menu({ menu, loading, cart, onAdd, onSetQty, onRemove, onReview,
   const byId = new Map((menu ?? []).map((m) => [m.id, m]));
   const total = cartTotalMinor(cart, menu);
   const flagged = new Set(cart.flagged);
-  const reviewable = canReview(cart);
+  const blocker = cartBlocker(cart, menu);
+  const reviewable = blocker === null;
 
   return (
     <div className="screen" data-screen="menu">
@@ -97,7 +98,9 @@ export function Menu({ menu, loading, cart, onAdd, onSetQty, onRemove, onReview,
         </div>
       </div>
       <footer className="actions">
-        <span className="hint">{reviewable ? 'Review your order to pay.' : flagged.size > 0 ? 'Remove the unavailable item to continue.' : 'Add at least one item to continue.'}</span>
+        <span className="hint" data-blocker={blocker ?? ''}>
+          {reviewable ? 'Review your order to pay.' : blocker === 'item_unavailable' ? 'Remove the unavailable item to continue.' : blocker === 'empty_cart' ? 'Add at least one item to continue.' : `Reduce your order to continue. ${BLOCK_COPY[blocker] ?? ''}`}
+        </span>
         <span className="spacer" />
         <button className="primary" onClick={onReview} disabled={!reviewable}>Review order</button>
       </footer>

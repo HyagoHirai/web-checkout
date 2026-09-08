@@ -32,10 +32,10 @@ export function App({ runtime }: { runtime: Runtime }) {
       screen = <Waiting onStartNew={a.startNewOrder} />;
       break;
     case 'confirmed':
-      screen = <Confirmed reference={i.submission?.reference ?? ''} totalMinor={i.submission?.expectedTotalMinor ?? 0} onDone={a.done} />;
+      screen = <Confirmed reference={i.submission?.reference ?? ''} totalMinor={i.submission?.recordedTotalMinor ?? i.submission?.expectedTotalMinor ?? 0} onDone={a.done} />;
       break;
     case 'declined':
-      screen = <Declined lines={i.submission?.lines ?? []} totalMinor={i.submission?.expectedTotalMinor ?? 0} onTryAgain={a.tryAgain} onEdit={a.goMenu} onStartNew={a.startNewOrder} />;
+      screen = <Declined lines={i.submission?.lines ?? []} totalMinor={i.submission?.recordedTotalMinor ?? i.submission?.expectedTotalMinor ?? 0} onTryAgain={a.tryAgain} onEdit={a.goMenu} onStartNew={a.startNewOrder} />;
       break;
     case 'unresolved':
       screen = <Unresolved knownState={i.submission?.knownState === 'pending' ? 'pending' : 'none'} reference={i.submission?.reference ?? null} onStartNew={a.startNewOrder} />;

@@ -90,7 +90,7 @@ describe('finding 5: a decline after a reload can be retried with the frozen lin
     expect(interactionOf(declined).phase).toBe('declined');
     const again = reduce(declined, { type: 'TRY_AGAIN', now: 2_000 });
     expect(interactionOf(again).screen).toBe('review');
-    expect(canReview(again.cart)).toBe(true);
+    expect(canReview(again.cart, MENU)).toBe(true);
   });
   it('a decline admitted with an empty cart rebuilds it from the frozen lines', () => {
     const s = { ...submitted(0), cart: { lines: [], flagged: [] } };
@@ -126,7 +126,7 @@ describe('finding 7: unknown items are flagged and the menu is re-fetched on Rev
       result: { category: 'rejected', rejection: { error: 'validation_rejected', reasons: ['unknown_item'], interactionId: IID, affectedItemIds: [COFFEE.id], currentItems: [] } },
     });
     expect(s.cart.flagged).toEqual([COFFEE.id]);
-    expect(canReview(s.cart)).toBe(false);
+    expect(canReview(s.cart, MENU)).toBe(false);
   });
   it('TRY_AGAIN from rejected requests a menu re-fetch; MENU_LOADED re-flags lines that are gone or unavailable', () => {
     const s = reduce(submitted(0), {
@@ -137,6 +137,6 @@ describe('finding 7: unknown items are flagged and the menu is re-fetched on Rev
     expect(again.menuLoading).toBe(true);
     const gone = reduce(again, { type: 'MENU_LOADED', now: 3, items: MENU.filter((m) => m.id !== COFFEE.id) });
     expect(gone.cart.flagged).toEqual([COFFEE.id]);
-    expect(canReview(gone.cart)).toBe(false);
+    expect(canReview(gone.cart, MENU)).toBe(false);
   });
 });

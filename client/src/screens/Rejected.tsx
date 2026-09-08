@@ -33,7 +33,7 @@ export function Rejected({ rejection, menu, cart, onReviewAgain, onStartNew }: P
       </header>
       <div className="content">
         <div className="card">
-          <div className="notice warn" role="alert">Nothing has been charged. {rejection.reasons.map((r) => COPY[r] ?? r).join(' ')}</div>
+          <div className="notice warn" role="alert">This attempt was not accepted. {rejection.reasons.map((r) => COPY[r] ?? r).join(' ')}</div>
           {rejection.affectedItemIds.map((id) => {
             const m = byId.get(id);
             const line = cart.lines.find((l) => l.itemId === id);

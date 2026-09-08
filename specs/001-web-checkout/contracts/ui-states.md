@@ -86,8 +86,9 @@ Conventions for every screen:
 
 ### S5 Confirmed
 
-- Shows: success, the order reference in its 4-character form, the total, and "quote this at the
-  counter" (FR-012).
+- Shows: success, the order reference in its 4-character form, the **recorded** total (the order
+  the server holds, which after a 409 lookup or a kept-key check may differ from what this attempt
+  sent), and "quote this at the counter" (FR-012).
 - Behaviour: returns to S0 after 15 s without any action (FR-013). The interaction ends. A repeated
   `paid` for the same intent does not restart the 15 s.
 - Actions: **Done** → S0 (optional early exit).
@@ -128,10 +129,16 @@ Conventions for every screen:
   - **Item unavailable**: the affected line flagged in the cart; the rest preserved.
   - **Out of bounds / empty / unknown item**: the reason in plain words (the client should have
     prevented these; the screen exists because the server enforces them independently, FR-006).
-- Actions: **Review again** → re-fetch the menu, re-price the whole cart, then S2 (price change; a
-  new intent and key) or S1 (unavailable, to act on the flagged line); **Start new order**.
-- No order exists for this submission (FR-009). The previous key is discarded. Emits
-  `rejection_shown`.
+- Actions: **Review again** → re-fetch the menu, re-price the whole cart, then S2 (price change) or
+  S1 (unavailable, to act on the flagged line); **Start new order**.
+- Copy states that *this attempt* was not accepted. It does not assert that nothing was charged:
+  this request created nothing, but under ADR-002's residual validation window a concurrent
+  request with the same key may still be accepted. The rejected key is therefore **kept**, can
+  never be re-sent, and is looked up once more when the customer confirms again (before a new key
+  is generated). Found paid → S5 with the recorded total; found declined → S6; found pending → S7a;
+  not found → a new intent and key. Emits `rejection_shown`.
+- A re-pricing can push a previously valid cart over a bound (FR-006); S1's Review control stays
+  disabled with the reason until the order is reduced.
 - Satisfies: US3, US7 scenarios 1–2.
 
 ### S9 Something went wrong

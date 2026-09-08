@@ -176,6 +176,16 @@ operation within its own interaction is explicitly permitted (constitution IV).
 5. A terminal result is not reapplied: receiving `paid` again in `confirmed` does not reset
    `resolvedAt` or restart the 15 s display; receiving `failed` again in `declined` is a no-op.
 
+**Stale documents** (review round four): a document restored from the back/forward cache keeps
+its heap. If another document in the same tab has since moved on (reset, a new interaction, a new
+attempt under the same interaction), the restored document's memory is stale. On `pageshow` and
+visibility the runtime compares its in-memory record with the tab's stored record byte for byte:
+equal → apply the clock only; different or absent → abandon memory and hydrate the stored record
+without ever writing over it; storage unavailable → apply the clock only. Playwright's default
+headless shell never restores from the bfcache and Playwright passes
+`--disable-back-forward-cache`, so the bfcache tests run in a separate project on the full Chromium
+channel without that flag and assert `pageshow.persisted === true`.
+
 **Deadline preservation rule** (stated identically in `data-model.md`): a response is not customer
 activity and never moves a deadline backward. On `unresolved → declined` the inactivity deadline
 already in force (`max(lastActivityAt, waitEndedAt) + 90 s`) is carried into `declined` unchanged;
@@ -442,8 +452,17 @@ content, a replay.
 
 **409 `intent_mismatch`** should be unreachable from this client (it re-sends the persisted frozen
 submission). If it arrives it is handled per the table above: lookup by key, show the recorded
-state. It is a conflict with an existing intent, not a rejection. **400** on POST (nothing created,
-key not consumed) → S9 with "try again".
+state with the **recorded** total, never this attempt's. It is a conflict with an existing intent,
+not a rejection. **400** on POST (nothing created, key not consumed) → S9 with "try again".
+
+**A rejected key is kept until a new intent replaces it** (review round four). A 422 means this
+request created nothing; it is not evidence that no concurrent request with the same key can be
+accepted (ADR-002 "The validation window"). The client keeps the key (it can never be re-sent:
+`sentAt` is set), lets the customer edit and re-confirm, and when they confirm again performs one
+lookup of the kept key before generating a new one. Found → the recorded state is applied; not
+found → a new key. This narrows the window from the winner's commit latency to the customer's
+reaction time without any per-intent coordination, which the owner ruled out. It is still not a
+proof, and the ADR says so.
 
 **Menu refresh policy**: `GET /api/menu` on Start and on leaving S8. The cart is re-priced from
 that fetch; the review total and `expectedTotalMinor` are one derived value from one cart state

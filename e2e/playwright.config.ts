@@ -27,6 +27,21 @@ export default defineConfig({
       },
     },
     {
+      // The default headless shell never restores from the back/forward cache and Playwright passes
+      // --disable-back-forward-cache. This project uses the full Chromium (new headless) without that
+      // flag, so pageshow.persisted === true is real and asserted (review round four, finding 1).
+      name: 'kiosk-bfcache',
+      testDir: './tests-bfcache',
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: 'chromium',
+        viewport: { width: 1024, height: 768 },
+        hasTouch: true,
+        isMobile: false,
+        launchOptions: { ignoreDefaultArgs: ['--disable-back-forward-cache'] },
+      },
+    },
+    {
       name: 'ops',
       testDir: './ops',
       timeout: 600_000,

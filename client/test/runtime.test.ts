@@ -18,17 +18,18 @@ function fakeFetch() {
   const calls: { url: string; method: string; body?: unknown; headers: Record<string, string> }[] = [];
   let onPost: Handler = () => json(201, orderStatus('paid'));
   let onGet: Handler = () => json(404, { error: 'not_found' });
+  let menu = MENU;
   const impl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
     const headers = Object.fromEntries(Object.entries((init?.headers as Record<string, string>) ?? {}));
     calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined, headers });
-    if (url === '/api/menu') return json(200, { currency: 'USD', items: MENU });
+    if (url === '/api/menu') return json(200, { currency: 'USD', items: menu });
     if (url === '/api/orders' && method === 'POST') return onPost(url, init);
     if (url.startsWith('/api/orders/by-key/')) return onGet(url, init);
     return json(404, { error: 'not_found' });
   }) as typeof fetch;
-  return { impl, calls, setPost: (h: Handler) => { onPost = h; }, setGet: (h: Handler) => { onGet = h; }, posts: () => calls.filter((c) => c.method === 'POST' && c.url === '/api/orders'), gets: () => calls.filter((c) => c.url.startsWith('/api/orders/by-key/')) };
+  return { impl, calls, setPost: (h: Handler) => { onPost = h; }, setGet: (h: Handler) => { onGet = h; }, setMenu: (m: typeof MENU) => { menu = m; }, posts: () => calls.filter((c) => c.method === 'POST' && c.url === '/api/orders'), gets: () => calls.filter((c) => c.url.startsWith('/api/orders/by-key/')) };
 }
 
 let rt: Runtime;
@@ -301,5 +302,67 @@ describe('review round three: suspension, visibility, cleanup, cadence', () => {
     expect(ff.gets()).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(ff.gets()).toHaveLength(3);
+  });
+});
+
+describe('review round four: stale documents and the last check before a new intent', () => {
+  it('finding 1: a restored document whose interaction was ended by another document abandons its state', async () => {
+    await toPayment();
+    rt.actions.backToCart();
+    expect(rt.getState().cart.lines).toHaveLength(1);
+    // another document in this tab reset and started B; this document's heap still holds A
+    sessionStorage.setItem('webcheckout.interaction', JSON.stringify({ ...rt.getState().interaction, id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', submission: null, screen: 'menu', phase: 'building' }));
+    window.dispatchEvent(new Event('pageshow'));
+    expect(rt.getState().interaction?.id).toBe('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+    expect(rt.getState().cart.lines).toHaveLength(0);
+  });
+  it('finding 1: when the other document reset to idle, the restored document goes idle too', async () => {
+    await toPayment();
+    sessionStorage.removeItem('webcheckout.interaction');
+    window.dispatchEvent(new Event('pageshow'));
+    expect(rt.getState().interaction).toBeNull();
+  });
+  it('finding 1: a live document whose record is still current keeps everything', async () => {
+    await toPayment();
+    rt.actions.backToCart();
+    window.dispatchEvent(new Event('pageshow'));
+    expect(rt.getState().cart.lines).toHaveLength(1);
+  });
+  it('finding 2: confirming again after a 422 checks the kept key first; found paid → confirmed with the recorded total, no second POST', async () => {
+    ff.setPost(() => json(422, { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: IID, currentTotalMinor: 800, currentItems: [{ ...COFFEE, priceMinor: 400 }], affectedItemIds: [COFFEE.id] }));
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('rejected');
+    // meanwhile the concurrent request that had passed validation paid K1 at $7.00
+    ff.setGet(() => json(200, orderStatus('paid', IID, { totalMinor: 700, replay: true })));
+    rt.actions.tryAgain();
+    await vi.advanceTimersByTimeAsync(10);
+    rt.actions.goPayment();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(ff.gets()).toHaveLength(1);
+    expect(ff.posts()).toHaveLength(1);
+    expect(rt.getState().interaction?.phase).toBe('confirmed');
+    expect(rt.getState().interaction?.submission?.recordedTotalMinor).toBe(700);
+  });
+  it('finding 2: when the kept key is still not found, a new key is created and sent', async () => {
+    ff.setPost(() => json(422, { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: IID, currentTotalMinor: 800, currentItems: [{ ...COFFEE, priceMinor: 400 }], affectedItemIds: [COFFEE.id] }));
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(10);
+    ff.setGet(() => json(404, { error: 'not_found' }));
+    ff.setPost(() => json(201, orderStatus('paid', IID, { totalMinor: 800 })));
+    ff.setMenu(MENU.map((m) => (m.id === COFFEE.id ? { ...m, priceMinor: 400 } : m))); // the re-fetched menu carries the new price
+    rt.actions.tryAgain();
+    await vi.advanceTimersByTimeAsync(10);
+    rt.actions.goPayment();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.screen).toBe('payment');
+    expect(rt.getState().interaction?.submission?.idempotencyKey).toBe(K2);
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(ff.posts()).toHaveLength(2);
+    expect(ff.posts()[1].body).toMatchObject({ idempotencyKey: K2, expectedTotalMinor: 800 });
+    expect(rt.getState().interaction?.phase).toBe('confirmed');
   });
 });

@@ -22,6 +22,8 @@ export interface Submission {
   pollStartedAt: number | null;
   knownState: KnownState;
   reference: string | null;
+  /** The total the server recorded for this key, once any outcome is known. Distinct from what was sent. */
+  recordedTotalMinor: number | null;
   simulation: SimulatedOutcome;
 }
 

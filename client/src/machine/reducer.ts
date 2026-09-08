@@ -43,8 +43,27 @@ export function cartChangeBlocker(cart: Cart, menu: MenuItem[] | null, itemId: s
   return null;
 }
 
-export function canReview(cart: Cart): boolean {
-  return cart.lines.length > 0 && cart.flagged.length === 0;
+/**
+ * Why the whole cart cannot be reviewed or frozen; null when it can. Re-pricing after a rejection
+ * can push a previously valid cart over a bound, so the bounds are checked here too, not only on
+ * quantity changes (FR-006).
+ */
+export function cartBlocker(cart: Cart, menu: MenuItem[] | null): string | null {
+  if (cart.lines.length === 0) return 'empty_cart';
+  if (cart.flagged.length > 0) return 'item_unavailable';
+  if (cart.lines.some((l) => l.quantity < 1 || l.quantity > MAX_QTY_PER_LINE)) return 'quantity_out_of_bounds';
+  if (cartUnits(cart) > MAX_UNITS_PER_ORDER) return 'units_out_of_bounds';
+  if (cartTotalMinor(cart, menu) > MAX_TOTAL_MINOR) return 'total_out_of_bounds';
+  return null;
+}
+
+export function canReview(cart: Cart, menu: MenuItem[] | null): boolean {
+  return cartBlocker(cart, menu) === null;
+}
+
+/** A submission that was sent and rejected is kept until a new intent replaces it (ADR-002 "The validation window"). */
+function keptIntent(i: Interaction): Submission | null {
+  return i.submission && i.submission.sentAt !== null ? i.submission : null;
 }
 
 function setLine(cart: Cart, itemId: string, quantity: number): Cart {
@@ -102,7 +121,11 @@ function applyResponse(state: State, ev: Extract<Event, { type: 'RESPONSE' }>): 
   const i = normalize(live, ev.now); // 1. valid by the clock, with a finished wait already applied
   if (!i || !i.submission) return state;
   if (!attributed(i, ev)) return state; // 2, 3. interaction and intent
-  if (i.phase !== 'submitted' && i.phase !== 'unresolved') return state; // 4. nothing leaves confirmed/declined; 5. terminal not reapplied
+  // 4. legal transitions: from submitted, from unresolved, and from building only for a sent-and-rejected
+  // key being checked once more before a new intent (research R10). Nothing leaves confirmed/declined;
+  // 5. a terminal is not reapplied.
+  const fromKept = i.phase === 'building' && keptIntent(i) !== null;
+  if (i.phase !== 'submitted' && i.phase !== 'unresolved' && !fromKept) return state;
   const sub = i.submission;
   const r = ev.result;
 
@@ -110,21 +133,27 @@ function applyResponse(state: State, ev: Extract<Event, { type: 'RESPONSE' }>): 
     case 'outcome': {
       const known = knownOf(r.status);
       if (DEFINITENESS[known] < DEFINITENESS[sub.knownState]) return state; // never regress (FR-033)
-      const nextSub: Submission = { ...sub, knownState: known, reference: r.status.reference };
+      // the recorded total belongs to the order the server holds, not to what this attempt sent (a 409
+      // lookup or a kept key can resolve to an order with a different total)
+      const nextSub: Submission = { ...sub, knownState: known, reference: r.status.reference, recordedTotalMinor: r.status.totalMinor };
       if (known === 'pending') {
+        if (fromKept) {
+          // the rejected key turned out to exist and is pending: no new intent, no pay-again (S7a)
+          return { ...state, rejection: null, interaction: { ...i, phase: 'unresolved', screen: 'menu', submission: nextSub } };
+        }
         if (sub.knownState === 'pending' && sub.reference === r.status.reference) return state; // nothing new
         // an early pending starts polling now (research R10)
         const pollStartedAt = sub.pollStartedAt ?? ev.now;
         return { ...state, interaction: { ...i, submission: { ...nextSub, pollStartedAt } } };
       }
       if (known === 'paid') {
-        return { ...state, interaction: { ...i, phase: 'confirmed', resolvedAt: ev.now, submission: nextSub } };
+        return { ...state, rejection: null, interaction: { ...i, phase: 'confirmed', resolvedAt: ev.now, submission: nextSub } };
       }
       // failed: a late decline preserves the deadline in force; an in-time one is ordinary building math.
       // After a reload the cart is empty: rebuild it from the frozen lines so Try again has an order.
       const deadlineAt = i.phase === 'unresolved' ? inactivityDeadline(i) : null;
       const cart = state.cart.lines.length > 0 ? state.cart : cartFromFrozen(sub.lines);
-      return { ...state, cart, interaction: { ...i, phase: 'declined', screen: 'menu', deadlineAt, submission: nextSub } };
+      return { ...state, cart, rejection: null, interaction: { ...i, phase: 'declined', screen: 'menu', deadlineAt, submission: nextSub } };
     }
     case 'conflict':
       // an order exists under this key and may be paid: the runtime performs a lookup; nothing changes here
@@ -138,18 +167,21 @@ function applyResponse(state: State, ev: Extract<Event, { type: 'RESPONSE' }>): 
       // the server omits unknown items from currentItems: an affected id that is not there is gone from the menu
       const unknownIds = r.rejection.reasons.includes('unknown_item') ? affected.filter((id) => !current.has(id)) : [];
       const baseCart = state.cart.lines.length > 0 ? state.cart : cartFromFrozen(sub.lines);
+      // The key is KEPT: this request created nothing, but under ADR-002's residual validation window a
+      // concurrent request with the same key may still be accepted. It is looked up once more before
+      // any new intent replaces it (runtime, goPayment).
       return {
         ...state,
         menu,
         cart: { ...baseCart, flagged: [...new Set([...baseCart.flagged, ...unavailableIds, ...unknownIds])] },
         rejection: { reasons: r.rejection.reasons, affectedItemIds: r.rejection.affectedItemIds ?? [], currentTotalMinor: r.rejection.currentTotalMinor },
-        interaction: { ...i, phase: 'building', screen: 'rejected', submission: null },
+        interaction: { ...i, phase: 'building', screen: 'rejected', submission: sub },
       };
     }
     case 'bad_request':
     case 'reference_exhausted': {
       if (i.phase !== 'submitted') return state;
-      return { ...state, error: { kind: r.category }, interaction: { ...i, phase: 'building', screen: 'error', submission: null } };
+      return { ...state, error: { kind: r.category }, interaction: { ...i, phase: 'building', screen: 'error', submission: sub } };
     }
     case 'unknown':
       if (i.phase !== 'submitted') return state;
@@ -176,7 +208,8 @@ export function reduce(state: State, ev: Event): State {
     const restored = ev.interaction ? normalize(ev.interaction, now) : null;
     if (!restored) return toIdle(state, now);
     if (restored.phase === 'building') {
-      return { ...initialState, now, menu: state.menu, interaction: { ...restored, screen: 'menu', submission: null, deadlineAt: restored.deadlineAt } };
+      // an unsent intent is discarded; a sent-and-rejected key is kept for the last check before a new intent
+      return { ...initialState, now, menu: state.menu, interaction: { ...restored, screen: 'menu', submission: keptIntent(restored), deadlineAt: restored.deadlineAt } };
     }
     return { ...initialState, now, menu: state.menu, cart: restored.submission ? cartFromFrozen(restored.submission.lines) : initialState.cart, interaction: restored };
   }
@@ -229,24 +262,24 @@ export function reduce(state: State, ev: Event): State {
     }
     case 'REMOVE_ITEM':
       if (i.phase !== 'building' && i.phase !== 'declined') return state;
-      return { ...state, now, cart: setLine(state.cart, ev.itemId, 0), interaction: { ...active, phase: 'building', screen: 'menu', submission: null } };
+      return { ...state, now, cart: setLine(state.cart, ev.itemId, 0), interaction: { ...active, phase: 'building', screen: 'menu', submission: keptIntent(i) } };
     case 'GO_REVIEW':
-      if ((i.phase !== 'building' && i.phase !== 'declined') || !canReview(state.cart)) return state;
-      return { ...state, now, rejection: null, interaction: { ...active, phase: 'building', screen: 'review', submission: null } };
+      if ((i.phase !== 'building' && i.phase !== 'declined') || !canReview(state.cart, state.menu)) return state;
+      return { ...state, now, rejection: null, interaction: { ...active, phase: 'building', screen: 'review', submission: keptIntent(i) } };
     case 'GO_MENU':
       if (i.phase !== 'building' && i.phase !== 'declined') return state;
-      return { ...state, now, interaction: { ...active, phase: 'building', screen: 'menu', submission: null } };
+      return { ...state, now, interaction: { ...active, phase: 'building', screen: 'menu', submission: keptIntent(i) } };
     case 'GO_PAYMENT': {
-      if (i.phase !== 'building' || !state.menu || !canReview(state.cart)) return state;
+      if (i.phase !== 'building' || !state.menu || !canReview(state.cart, state.menu)) return state;
       const lines = freeze(state.cart, state.menu);
       const submission: Submission = {
         idempotencyKey: ev.idempotencyKey, lines, expectedTotalMinor: cartTotalMinor(state.cart, state.menu),
-        sentAt: null, pollStartedAt: null, knownState: 'none', reference: null, simulation: 'success',
+        sentAt: null, pollStartedAt: null, knownState: 'none', reference: null, recordedTotalMinor: null, simulation: 'success',
       };
       return { ...state, now, interaction: { ...active, screen: 'payment', submission } };
     }
     case 'BACK_TO_CART':
-      // before send only: discards the key (ADR-002). In submitted/unresolved this is refused.
+      // before send only: discards the unsent key (ADR-002). In submitted/unresolved this is refused.
       if (i.phase !== 'building' || i.screen !== 'payment') return state;
       return { ...state, now, interaction: { ...active, screen: 'menu', submission: null } };
     case 'SET_SIMULATION':
@@ -254,6 +287,7 @@ export function reduce(state: State, ev: Event): State {
       return { ...state, now, interaction: { ...active, submission: { ...i.submission, simulation: ev.outcome } } };
     case 'PAY':
       if (i.phase !== 'building' || i.screen !== 'payment' || !i.submission || i.submission.sentAt !== null) return state;
+      if (!canReview(state.cart, state.menu)) return state; // FR-006 on the client, also after a re-pricing
       return { ...state, now, interaction: { ...active, phase: 'submitted', submission: { ...i.submission, sentAt: now } } };
     case 'POLL_START': {
       if (i.phase !== 'submitted' || !i.submission || i.submission.pollStartedAt !== null) return state;
@@ -266,13 +300,15 @@ export function reduce(state: State, ev: Event): State {
     case 'RETRY_AFTER_ERROR':
       if (i.phase !== 'building' || i.screen !== 'error') return state;
       if (state.error?.kind === 'menu_unreachable') return { ...state, now, error: null, menuLoading: true, interaction: { ...active, screen: 'menu' } };
-      return { ...state, now, error: null, interaction: { ...active, screen: canReview(state.cart) ? 'review' : 'menu' } };
+      return { ...state, now, error: null, interaction: { ...active, screen: canReview(state.cart, state.menu) ? 'review' : 'menu' } };
     case 'TRY_AGAIN':
       // from declined (new intent, cart intact) or from rejected (re-priced cart). The menu is
       // re-fetched so the next intent is priced and flagged against current values (ui-states S8).
       if (i.phase === 'declined' || (i.phase === 'building' && i.screen === 'rejected')) {
-        const target = canReview(state.cart) ? 'review' : 'menu';
-        return { ...state, now, rejection: null, menuLoading: true, interaction: { ...active, phase: 'building', screen: target, submission: null } };
+        const target = canReview(state.cart, state.menu) ? 'review' : 'menu';
+        // a declined key is terminal for that order; a rejected key is kept for the last check
+        const kept = i.phase === 'declined' ? null : keptIntent(i);
+        return { ...state, now, rejection: null, menuLoading: true, interaction: { ...active, phase: 'building', screen: target, submission: kept } };
       }
       return state;
     case 'DONE':

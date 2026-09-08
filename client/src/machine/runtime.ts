@@ -4,7 +4,7 @@ import { createApi, type Api } from '../api/client.ts';
 import { emit } from '../api/telemetry.ts';
 import { pollDueAt, waitEndedAt } from './deadlines.ts';
 import { initialState, reduce } from './reducer.ts';
-import { clear, load, save } from './storage.ts';
+import { clear, isCurrent, load, readRaw, save } from './storage.ts';
 import type { Event, State } from './types.ts';
 import { newUuid } from './uuid.ts';
 
@@ -179,8 +179,17 @@ export function createRuntime(opts: RuntimeOptions = {}) {
    */
   function revalidate(): void {
     const t = now();
-    if (state.interaction) dispatch({ type: 'TICK', now: t });
-    else dispatch({ type: 'RESUME', now: t, interaction: load() });
+    const live = state.interaction;
+    if (live) {
+      // A document restored from the back/forward cache keeps its heap. If another document in this
+      // tab has since moved on (reset, new interaction, new attempt), this one's memory is stale: it
+      // abandons its state and hydrates the tab's current record (FR-028). It never writes over it.
+      const raw = readRaw();
+      if (raw === undefined || isCurrent(live, raw)) dispatch({ type: 'TICK', now: t });
+      else dispatch({ type: 'RESUME', now: t, interaction: load() });
+    } else {
+      dispatch({ type: 'RESUME', now: t, interaction: load() });
+    }
     const ni = state.interaction;
     if (ni && ni.phase === 'submitted' && ni.submission) {
       if (ni.submission.pollStartedAt === null) {
@@ -230,7 +239,24 @@ export function createRuntime(opts: RuntimeOptions = {}) {
       removeItem: (itemId: string) => dispatch({ type: 'REMOVE_ITEM', now: now(), itemId }),
       goReview: () => dispatch({ type: 'GO_REVIEW', now: now() }),
       goMenu: () => dispatch({ type: 'GO_MENU', now: now() }),
-      goPayment: () => dispatch({ type: 'GO_PAYMENT', now: now(), idempotencyKey: uuid() }),
+      goPayment: () => {
+        const i = state.interaction;
+        const kept = i && i.phase === 'building' && i.submission && i.submission.sentAt !== null ? i.submission : null;
+        if (!i || !kept) {
+          dispatch({ type: 'GO_PAYMENT', now: now(), idempotencyKey: uuid() });
+          return;
+        }
+        // A sent-and-rejected key is checked once more before a new intent replaces it: under
+        // ADR-002's residual validation window a concurrent request may have accepted it after
+        // this client was told "rejected". Found → the recorded state is shown; not found → new key.
+        const interactionId = i.id;
+        const key = kept.idempotencyKey;
+        void api.lookupByKey(key, interactionId).then((result) => {
+          if (result.category === 'outcome') admit({ source: 'lookup', interactionId, idempotencyKey: key, result });
+          const cur = state.interaction;
+          if (cur && cur.id === interactionId && cur.phase === 'building') dispatch({ type: 'GO_PAYMENT', now: now(), idempotencyKey: uuid() });
+        });
+      },
       backToCart: () => dispatch({ type: 'BACK_TO_CART', now: now() }),
       setSimulation: (outcome: 'success' | 'declined' | 'inconclusive') => dispatch({ type: 'SET_SIMULATION', now: now(), outcome }),
       pay: () => dispatch({ type: 'PAY', now: now() }),

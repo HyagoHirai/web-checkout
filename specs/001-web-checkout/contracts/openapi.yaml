@@ -21,8 +21,10 @@ info:
          admission rule.
       2. Conflict with an existing intent: 409 `intent_mismatch`. An order exists under this key and may
          be paid; the client looks it up by key and shows the recorded state, never a rejection.
-      3. Request rejected, nothing created, key not consumed: 400 with a recognised body,
-         422 `validation_rejected`, 503 `reference_exhausted`.
+      3. Request rejected: 400 with a recognised body, 422 `validation_rejected`, 503 `reference_exhausted`.
+         THIS request created nothing and consumed no key. Under ADR-002's residual validation window a
+         concurrent request carrying the same key may still be accepted, so the client keeps the key and
+         looks it up once more before creating a new intent; only then is the key discarded.
       4. Unknown outcome: everything else — network failure, timeout, 404 on lookup, any status whose
          body is not recognised, any other 5xx. Never a decline, never permission to pay again.
 
@@ -115,7 +117,11 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/IntentMismatch" }
         "422":
-          description: Validation rejected before payment. No order, nothing pending (ADR-003 "Rejection is not failure").
+          description: |
+            Validation rejected before payment: this request created no order and consumed no key (ADR-003
+            "Rejection is not failure"). A concurrent request with the same key that passed validation earlier may
+            still commit (ADR-002 "The validation window"); the client keeps the key and checks it once more before
+            a new intent.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ValidationRejection" }
