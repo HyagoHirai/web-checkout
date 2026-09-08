@@ -85,10 +85,12 @@ once, briefly. May abandon at any point. There is no second user role in scope.
 - Q (plan review): What exactly does "at most one payment" promise? → A: At most one order per
   intent, exactly one where acceptance occurred, and the simulator called at most once per intent.
 - Q (review round six): How does the "not found" rule reconcile with re-confirmation after a
-  rejection? → A: Applied for consistency with the owner's earlier decisions (re-confirmation per
-  FR-009; no per-intent coordination per ADR-002): a recognised "not found" on the check made at
-  re-confirmation permits a new intent; anything else keeps the key. Recorded in ADR-002 and FR-024;
-  owner to confirm.
+  rejection? → A (owner, 2026-09-08): Confirmed with the narrow scope: only the service's explicit
+  `not_found` permits a new key; a network failure, a 5xx, or any other answer keeps it. The check
+  narrows the window rather than closing it, and ADR-002 says so under "Where this still breaks".
+- Q (plan review, round four): FR-009 said "No order MUST be created for a rejected submission".
+  → A (owner, 2026-09-08): Changed to "No order is created by a rejected request." The mechanism
+  guarantees something about the request, not the intent; the earlier wording contradicted ADR-002.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -405,9 +407,10 @@ stays.
   MUST never be charged an amount different from what was displayed.
 - **FR-009**: If, at submission, the total the server recomputes from current prices differs
   from the total the customer was shown, the system MUST reject the submission before any payment,
-  show the current prices and total, and require the customer to confirm again. No order MUST be
-  created for a rejected submission. The guarantee is over the total (ADR-003): per-line movements
-  that leave the total unchanged are accepted.
+  show the current prices and total, and require the customer to confirm again. No order is created
+  by a rejected request; a concurrent request carrying the same key may still be accepted (ADR-002,
+  "The validation window"). The guarantee is over the total (ADR-003): per-line movements that
+  leave the total unchanged are accepted.
 - **FR-010**: If, at the point a submission is validated, an item in the cart is unavailable, the
   system MUST reject the submission before payment, tell the customer, flag the item in the cart
   without removing it, preserve the rest of the order, and MUST NOT proceed to payment until the
@@ -458,10 +461,11 @@ stays.
   counter will find anything (ADR-005).
 - **FR-024**: A generic server error, or a failed status lookup, MUST be treated as unknown —
   never as a known decline, and never as permission to start a new payment for the same items.
-  One exception, decided with ADR-002 (amended 2026-09-08): after a submission was rejected before
-  payment, the re-confirmation the customer makes first checks the rejected key, and a "not found"
-  recognised as the service's own answer permits a new intent; any other answer to that check keeps
-  the key and permits nothing.
+  One exception, decided with ADR-002 (amended 2026-09-08, confirmed by the owner): after a
+  submission was rejected before payment, the re-confirmation the customer makes first checks the
+  rejected key, and a "not found" recognised as the service's own answer permits a new intent; a
+  network failure, a 5xx, or any other answer to that check keeps the key and permits nothing. The
+  check narrows ADR-002's window; it does not close it.
 - **FR-025**: What the customer's screen shows MUST be kept separate from what exists server-side.
   A client-side timeout on its own confirms neither acceptance nor rejection; if the order was
   accepted, its record remains, unresolved.
