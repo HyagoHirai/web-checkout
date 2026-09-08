@@ -64,3 +64,18 @@ test.describe('US1: order and pay at the kiosk', () => {
     await expect(page.getByRole('button', { name: 'Review order' })).toBeDisabled();
   });
 });
+
+test('round seven: order limits are explained on screen, not in a tooltip (FR-006)', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start your order' }).tap();
+  // 5 items × 10 = 50 units, the order maximum
+  for (const name of ['Coffee', 'Latte', 'Iced tea', 'Sparkling water', 'Chocolate chip cookie']) {
+    await page.getByRole('button', { name: `Add ${name}` }).tap();
+    for (let i = 0; i < 9; i += 1) await page.getByRole('button', { name: `More ${name}` }).tap();
+    await expect(page.locator(`.item:has-text("${name}") [data-limit="quantity"]`)).toHaveText('Max 10'); // the per-item reason, visible on the card
+  }
+  await expect(page.getByRole('button', { name: 'Add Bagel with cream cheese' })).toBeDisabled();
+  await expect(page.locator('[data-limit="order"]')).toBeVisible();
+  await expect(page.locator('[data-limit="order"]')).toHaveText('At most 50 items per order.');
+  await expect(page.getByRole('button', { name: 'Review order' })).toBeEnabled(); // a full cart is still a valid one
+});

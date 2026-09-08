@@ -1,6 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const clientPort = process.env.CLIENT_PORT ?? '8080';
+
+function opsOnly(argv: string[]): boolean {
+  const projects: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--project' && argv[i + 1]) projects.push(argv[i + 1]);
+    else if (argv[i].startsWith('--project=')) projects.push(argv[i].slice('--project='.length));
+  }
+  return projects.length > 0 && projects.every((p) => p === 'ops');
+}
 const baseURL = `http://localhost:${clientPort}`;
 
 export default defineConfig({
@@ -47,7 +56,9 @@ export default defineConfig({
       timeout: 600_000,
     },
   ],
-  webServer: process.env.PLAYWRIGHT_NO_SERVER
+  // The ops project acts on its own compose project only: it must never start the demo stack. The
+  // script sets PLAYWRIGHT_NO_SERVER; an ops-only invocation is also detected from the arguments.
+  webServer: process.env.PLAYWRIGHT_NO_SERVER || opsOnly(process.argv)
     ? undefined
     : {
         command: 'docker compose up --build',

@@ -252,6 +252,7 @@ components:
 
     OrderLine:
       type: object
+      additionalProperties: false
       required: [itemId, quantity]
       properties:
         itemId: { $ref: "#/components/schemas/Uuid" }

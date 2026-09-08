@@ -139,3 +139,29 @@ test('finding 1 (round six): a 404 that is not the API\'s not_found body keeps t
   const after = await metrics(page);
   expect(delta(before, after, 'orders.accepted')).toBe(1);
 });
+
+test('round seven: a re-pricing that needs two decrements can be reduced step by step', async ({ page }) => {
+  await page.goto('/');
+  await withMenuChange([{ slug: 'sandwich', priceMinor: 20_000 }], async () => {
+    await page.getByRole('button', { name: 'Start your order' }).tap();
+    await page.getByRole('button', { name: 'Add Turkey sandwich' }).tap();
+    for (let i = 0; i < 4; i += 1) await page.getByRole('button', { name: 'More Turkey sandwich' }).tap();
+    await expect(page.locator('[data-total]')).toHaveText('$1,000.00');
+    await goToPayment(page);
+    await withMenuChange([{ slug: 'sandwich', priceMinor: 30_000 }], async () => {
+      await choose(page, 'success');
+      await pay(page);
+      await expect(page.locator('[data-screen="rejected"]')).toBeVisible();
+      await page.locator('[data-action="review-again"]').tap();
+      await expect(page.locator('[data-screen="menu"]')).toBeVisible();
+      await expect(page.locator('[data-total]')).toHaveText('$1,500.00');
+      await expect(page.getByRole('button', { name: 'Review order' })).toBeDisabled();
+      await page.getByRole('button', { name: 'Fewer Turkey sandwich' }).tap();
+      await expect(page.locator('[data-total]')).toHaveText('$1,200.00'); // still over, but the decrement applied
+      await expect(page.getByRole('button', { name: 'Review order' })).toBeDisabled();
+      await page.getByRole('button', { name: 'Fewer Turkey sandwich' }).tap();
+      await expect(page.locator('[data-total]')).toHaveText('$900.00');
+      await expect(page.getByRole('button', { name: 'Review order' })).toBeEnabled();
+    });
+  });
+});

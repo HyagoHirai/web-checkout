@@ -169,7 +169,9 @@ function applyResponse(state: State, ev: Extract<Event, { type: 'RESPONSE' }>): 
       // an order exists under this key and may be paid: the runtime performs a lookup; nothing changes here
       return state;
     case 'rejected': {
-      if (i.phase !== 'submitted') return state;
+      // A rejection is less definite than a known acceptance: once any response has established that
+      // the intent exists (pending or terminal), a late rejection of one request is stale (FR-033).
+      if (i.phase !== 'submitted' || sub.knownState !== 'none') return state;
       const current = new Map((r.rejection.currentItems ?? []).map((m) => [m.id, m]));
       const menu = state.menu ? state.menu.map((m) => current.get(m.id) ?? m) : state.menu;
       const affected = r.rejection.affectedItemIds ?? [];
@@ -190,7 +192,7 @@ function applyResponse(state: State, ev: Extract<Event, { type: 'RESPONSE' }>): 
     }
     case 'bad_request':
     case 'reference_exhausted': {
-      if (i.phase !== 'submitted') return state;
+      if (i.phase !== 'submitted' || sub.knownState !== 'none') return state; // same monotonicity as above
       return { ...state, error: { kind: r.category }, interaction: { ...i, phase: 'building', screen: 'error', submission: sub } };
     }
     case 'unknown':
@@ -288,7 +290,9 @@ export function reduce(state: State, ev: Event): State {
       return { ...state, now, menu: ev.items, menuLoading: false, cart, activeCheck: left ? null : state.activeCheck, interaction: { ...active, screen, submission } };
     }
     case 'MENU_FAILED':
-      if (i.phase !== 'building') return state;
+      // the loading flag always clears (the runtime starts refreshes on false → true); only a building
+      // interaction shows the error screen for it
+      if (i.phase !== 'building') return { ...state, now, menuLoading: false };
       return { ...state, now, menuLoading: false, error: { kind: 'menu_unreachable' }, interaction: { ...active, screen: 'error' } };
     case 'ADD_ITEM': {
       if (i.phase !== 'building') return state;
@@ -298,7 +302,11 @@ export function reduce(state: State, ev: Event): State {
     }
     case 'SET_QTY': {
       if (i.phase !== 'building') return state;
-      if (ev.quantity > 0 && cartChangeBlocker(state.cart, state.menu, ev.itemId, ev.quantity)) return { ...state, now, interaction: active };
+      // only increments are bounded; a decrement always applies, so a cart pushed over a bound by a
+      // re-pricing can be reduced step by step (review and payment stay blocked until it is valid)
+      const current = state.cart.lines.find((l) => l.itemId === ev.itemId)?.quantity ?? 0;
+      const increment = ev.quantity > current;
+      if (increment && cartChangeBlocker(state.cart, state.menu, ev.itemId, ev.quantity)) return { ...state, now, interaction: active };
       return { ...state, now, cart: setLine(state.cart, ev.itemId, Math.max(0, ev.quantity)), interaction: active };
     }
     case 'REMOVE_ITEM':

@@ -1,7 +1,7 @@
 import type { MenuItem } from '../../../shared/wire.ts';
 import { MAX_QTY_PER_LINE, MAX_UNITS_PER_ORDER, MAX_TOTAL_MINOR } from '../../../shared/constants.ts';
 import { formatMinor } from '../money/format.ts';
-import { cartBlocker, cartChangeBlocker, cartTotalMinor } from '../machine/reducer.ts';
+import { cartBlocker, cartChangeBlocker, cartTotalMinor, cartUnits } from '../machine/reducer.ts';
 import type { Cart } from '../machine/types.ts';
 
 interface Props {
@@ -32,6 +32,15 @@ export function Menu({ menu, loading, cart, onAdd, onSetQty, onRemove, onReview,
   const available = (menu ?? []).filter((m) => m.available);
   const unavailable = (menu ?? []).filter((m) => !m.available);
 
+  // A valid cart can still be at a limit that stops further adding; the reason must be visible, not a
+  // tooltip (FR-006, ui-states S1). The per-item limit is shown on the card itself.
+  const units = cartUnits(cart);
+  const limitReason =
+    units >= MAX_UNITS_PER_ORDER
+      ? BLOCK_COPY.units_out_of_bounds
+      : available.length > 0 && available.every((m) => cartChangeBlocker(cart, menu, m.id, (cart.lines.find((l) => l.itemId === m.id)?.quantity ?? 0) + 1) === 'total_out_of_bounds')
+        ? BLOCK_COPY.total_out_of_bounds
+        : null;
   const hint = reviewable
     ? 'Review your order to pay.'
     : blocker === 'item_unavailable'
@@ -61,10 +70,13 @@ export function Menu({ menu, loading, cart, onAdd, onSetQty, onRemove, onReview,
                 const changeBlocker = cartChangeBlocker(cart, menu, m.id, existing + 1);
                 return (
                   <div key={m.id} className="item" data-item={m.id}>
-                    <div className="name">{m.name}</div>
+                    <div className="name">
+                      {m.name}
+                      {changeBlocker === 'quantity_out_of_bounds' && <span className="badge" data-limit="quantity">Max {MAX_QTY_PER_LINE}</span>}
+                    </div>
                     <div className="row">
                       <span className="price">{formatMinor(m.priceMinor)}</span>
-                      <button onClick={() => onAdd(m.id)} disabled={changeBlocker !== null} aria-label={`Add ${m.name}`} title={changeBlocker ? BLOCK_COPY[changeBlocker] : undefined}>
+                      <button onClick={() => onAdd(m.id)} disabled={changeBlocker !== null} aria-label={`Add ${m.name}`}>
                         + Add
                       </button>
                     </div>
@@ -122,6 +134,7 @@ export function Menu({ menu, loading, cart, onAdd, onSetQty, onRemove, onReview,
               </div>
               <button className="primary" onClick={onReview} disabled={!reviewable}>Review order</button>
               <span className="hint" data-blocker={blocker ?? ''}>{hint}</span>
+              {limitReason && reviewable && <span className="hint limit" data-limit="order" role="status">{limitReason}</span>}
             </div>
           </aside>
         </div>

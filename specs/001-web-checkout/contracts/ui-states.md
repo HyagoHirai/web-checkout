@@ -40,7 +40,9 @@ Conventions for every screen:
   FR-004; 10 is the ceiling, FR-006); remove; **Review** (disabled when the cart is empty, FR-005,
   or when any line is flagged, FR-010); **Start new order**.
 - Guards: adding beyond 50 units in the order or a total beyond $1,000.00 is refused with a visible
-  reason (FR-006).
+  reason (FR-006): the order panel shows the limit reached, and a card whose item is at its
+  per-item maximum shows "Max 10". Decrements always apply, so a cart pushed over a bound by a
+  re-pricing can be reduced step by step; review and payment stay blocked until it is valid.
 - Satisfies: US1 scenarios 2–5, 9; US7.
 
 ### S2 Review
@@ -112,8 +114,10 @@ Conventions for every screen:
   counter will find anything.
 - Both: state that the purchase may need help at the counter while the kiosk itself recovers
   (NFR-004 exception). Neither offers any way to pay again (FR-022). The inactivity timer resumes on
-  entry (FR-031): the deadline is `max(lastActivityAt, sentAt + 38 s) + 90 s`, computed from
-  persisted timestamps; entering this screen stamps no activity. Emits `unresolved_shown`.
+  entry (FR-031): the deadline is `max(lastActivityAt, waitEndedAt) + 90 s`, where `waitEndedAt =
+  pollStartedAt + 30 s` and is never later than `sentAt + 38 s` (polling that started early ends
+  early), computed from persisted timestamps; entering this screen stamps no activity. Emits
+  `unresolved_shown`.
 - Behaviour: a late definitive result for the **same intent** moves to S5 or S6 (FR-034). Into S6
   the deadline in force is preserved: the response is not activity and never moves the deadline
   backward (research R4). A late `pending` on S7b upgrades the wording to S7a; never the reverse

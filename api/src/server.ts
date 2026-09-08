@@ -13,7 +13,7 @@ import { buildApp, type BootInfo } from './app.ts';
  * seed are ready; `startup.listening` is emitted by `main` after listen() resolves. `boot` is
  * callable without listening so tests can assert the sequence.
  */
-export async function boot(config: Config, logger: Logger, pool: Pool): Promise<{ app: ReturnType<typeof buildApp>; bootInfo: BootInfo }> {
+export async function boot(config: Config, logger: Logger, pool: Pool, counters = createCounters()): Promise<{ app: ReturnType<typeof buildApp>; bootInfo: BootInfo }> {
   await waitForDatabase(pool, logger);
   const m = await migrate(pool, logger);
   logger.info({ event: 'startup.migrations_applied', applied: m.applied, latest: m.latest }, 'migrations applied');
@@ -29,16 +29,18 @@ export async function boot(config: Config, logger: Logger, pool: Pool): Promise<
     'simulator configured',
   );
   const bootInfo: BootInfo = { migrations: m.latest, seed: s.inserted > 0 ? 'applied' : 'already-present' };
-  const app = buildApp({ pool, simulator, logger, counters: createCounters(), boot: bootInfo });
+  const app = buildApp({ pool, simulator, logger, counters, boot: bootInfo });
   return { app, bootInfo };
 }
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger(config.logLevel);
-  const pool = createPool(config.databaseUrl, logger);
+  // One counters instance for the pool and the app, so db.pool_error is counted where it is served.
+  const counters = createCounters();
+  const pool = createPool(config.databaseUrl, logger, counters);
   try {
-    const { app } = await boot(config, logger, pool);
+    const { app } = await boot(config, logger, pool, counters);
     await app.listen({ port: config.port, host: '0.0.0.0' });
     logger.info({ event: 'startup.listening', port: config.port }, 'listening');
     const shutdown = (signal: string) => {

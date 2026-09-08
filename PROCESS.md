@@ -132,6 +132,30 @@ Specific, because the point is what had to be noticed.
   because FR-009's re-confirmation must be possible and the owner ruled out per-intent
   coordination); anything else keeps the key, shows "we could not check your previous attempt",
   and lets the customer retry.
+- **The rejection branches skipped the monotonicity guard the outcome branch had.** A polling
+  answer had already told the client that K1 existed (`pending`), and a 422 for one request that
+  arrived later still moved the screen to "rejected" and, because the kept-key rule only kept keys
+  with no known outcome, dropped exactly the key whose acceptance was known. A seventh review
+  reproduced the double payment with real API, database and a held response. Rejections, 400s and
+  503s are now admitted only while nothing is known about the intent; once any response has
+  established that it exists, a later rejection of one request is stale.
+- **A menu failure outside `building` left the loading flag stuck.** The runtime starts a refresh
+  only on the flag's false-to-true edge, so after one failure during `submitted` no later "Try
+  again" refreshed the menu. The flag now clears on every failure; only a building interaction
+  shows the error screen for it.
+- **The ops script inherited the global webServer.** With the demo URL down, `npm run test:ops`
+  would have run `docker compose up --build` on the demo stack, reseeding it, before touching its
+  own project. The script now disables the webServer, the config detects an ops-only invocation,
+  and an ops test asserts that no webServer is configured.
+- **Decrements were bounded like increments.** A cart pushed over the total cap by a re-pricing
+  could not be reduced one step at a time because each intermediate total was still over the cap.
+  Only increments are bounded now.
+- **Limits were explained in a tooltip.** At 50 units every Add was disabled with a `title` and
+  the panel still said "Review your order to pay." The order panel now names the limit reached, and
+  a card at its per-item maximum shows "Max 10".
+- **The pool's error counter was never wired on the production path.** `main()` created the pool
+  before the app's counters existed. One counters instance is now shared, and a startup test emits a
+  pool error and reads it back from the metrics endpoint.
 - **The 404 exception was keyed on the status code, not on the recognised body.** Round five made
   a `404` on the last check the one answer that permits a new key, but any HTTP 404 qualified,
   including an HTML page from an intermediary. A sixth review reproduced the double payment with a
@@ -261,6 +285,14 @@ volume path that the verifier had already corrected; three incompatible test-run
 incompatible TypeScript execution models; `format: uuid` in the contract versus a strict pattern in
 the research; the interaction id in the body in one document and in a header in another. All
 refinements, resolved by reconciliation.
+
+**Round seven** (the same external agent, on the whole implementation at `a935d89`) found one
+high defect (a late rejection erasing a known acceptance), four medium ones (a stuck menu-loading
+flag; the ops script able to start the demo stack; bounded decrements; limits explained only in a
+tooltip) and one low (the pool error counter unwired in production). All reproduced and fixed with
+regressions; the UI contract's unresolved deadline and the OpenAPI `OrderLine` schema were aligned
+with the code. Still pending the owner's word: the 404-at-re-confirmation exception in ADR-002 and
+FR-024, and FR-009's "no order for a rejected submission" wording.
 
 **Round six** (the same external agent, on commit `8a9573a`) found one high and three medium
 defects, all reproduced and fixed with regressions: an unrecognised 404 body releasing a new key;
