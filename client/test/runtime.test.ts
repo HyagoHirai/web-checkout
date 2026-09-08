@@ -59,7 +59,23 @@ async function toPayment() {
   rt.actions.goPayment();
 }
 
-describe('US1: the happy path through the runtime', () => {
+
+/** A 422 for K1, then Try again with the re-fetched menu carrying the new price: the review with a retained key. */
+const rejected422 = () => json(422, { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: IID, currentTotalMinor: 800, currentItems: [{ ...COFFEE, priceMinor: 400 }], affectedItemIds: [COFFEE.id] });
+const priced = () => MENU.map((m) => (m.id === COFFEE.id ? { ...m, priceMinor: 400 } : m));
+async function rejectedThenReview() {
+  ff.setPost(rejected422);
+  await toPayment();
+  rt.actions.pay();
+  await vi.advanceTimersByTimeAsync(10);
+  expect(rt.getState().interaction?.screen).toBe('rejected');
+  ff.setMenu(priced());
+  rt.actions.tryAgain();
+  await vi.advanceTimersByTimeAsync(10);
+  expect(rt.getState().interaction?.screen).toBe('review');
+}
+
+describe('the happy path through the runtime (US1)', () => {
   it('loads the menu on start, POSTs once on pay with the frozen intent, confirms, and idles after 15 s', async () => {
     await toPayment();
     expect(rt.getState().menu).toEqual(MENU);
@@ -77,7 +93,7 @@ describe('US1: the happy path through the runtime', () => {
   });
 });
 
-describe('US2: freezing and recovery (FR-014, FR-016, FR-017)', () => {
+describe('freezing and recovery (US2: FR-014, FR-016, FR-017)', () => {
   it('a second pay while submitted sends nothing', async () => {
     let release!: () => void;
     ff.setPost(() => new Promise<Response>((r) => { release = () => r(json(201, orderStatus('paid'))); }));
@@ -121,7 +137,7 @@ describe('US2: freezing and recovery (FR-014, FR-016, FR-017)', () => {
   });
 });
 
-describe('US4: the bounded wait, polling, unknown outcomes and late results (FR-022..FR-025, FR-031, FR-034)', () => {
+describe('the bounded wait, polling, unknown outcomes and late results (US4: FR-022..FR-025, FR-031, FR-034)', () => {
   it('no response: polling starts at 8 s every 2 s and unresolved arrives at 38 s (S7b, no reference)', async () => {
     ff.setPost(() => new Promise<Response>(() => {}));
     await toPayment();
@@ -199,7 +215,7 @@ describe('US4: the bounded wait, polling, unknown outcomes and late results (FR-
   });
 });
 
-describe('US8: unreachable before submission (FR-026)', () => {
+describe('unreachable before submission (US8: FR-026)', () => {
   it('menu failure shows the error screen; retry re-fetches and emits service_unreachable', async () => {
     const good = ff.impl;
     let fail = true;
@@ -223,7 +239,7 @@ describe('US8: unreachable before submission (FR-026)', () => {
   });
 });
 
-describe('US9: discarded responses are reported', () => {
+describe('discarded responses are reported (US9)', () => {
   it('a response for a concluded interaction is discarded and reported as foreign', async () => {
     let release!: () => void;
     ff.setPost(() => new Promise<Response>((r) => { release = () => r(json(201, orderStatus('paid'))); }));
@@ -240,8 +256,8 @@ describe('US9: discarded responses are reported', () => {
   });
 });
 
-describe('review round three: suspension, visibility, cleanup, cadence', () => {
-  it('finding 2: a visibility change keeps the cart of a live interaction', async () => {
+describe('suspension, visibility, cleanup and polling cadence', () => {
+  it('a visibility change keeps the cart of a live interaction', async () => {
     await toPayment();
     rt.actions.backToCart();
     expect(rt.getState().cart.lines).toEqual([{ itemId: COFFEE.id, quantity: 2 }]);
@@ -252,7 +268,7 @@ describe('review round three: suspension, visibility, cleanup, cadence', () => {
     expect(rt.getState().interaction?.phase).toBe('building');
   });
 
-  it('finding 1 at the runtime: resuming a submitted record after 600 s suspended goes idle, not to a fresh wait', async () => {
+  it('resuming a submitted record after 600 s suspended goes idle, not to a fresh wait', async () => {
     ff.setPost(() => new Promise<Response>(() => {}));
     await toPayment();
     rt.actions.pay();
@@ -266,7 +282,7 @@ describe('review round three: suspension, visibility, cleanup, cadence', () => {
     rt2.stop();
   });
 
-  it('finding 1 at the runtime: resumed at 40 s the wait is over and a late paid is still applied (interaction valid until 128 s)', async () => {
+  it('resumed at 40 s the wait is over: unresolved, still valid until 128 s, and no polling restarts', async () => {
     ff.setPost(() => new Promise<Response>(() => {}));
     await toPayment();
     rt.actions.pay();
@@ -305,8 +321,8 @@ describe('review round three: suspension, visibility, cleanup, cadence', () => {
   });
 });
 
-describe('review round four: stale documents and the last check before a new intent', () => {
-  it('finding 1: a restored document whose interaction was ended by another document abandons its state', async () => {
+describe('stale documents (back/forward cache) and the last check of a retained key', () => {
+  it('a restored document whose interaction was ended by another document abandons its state', async () => {
     await toPayment();
     rt.actions.backToCart();
     expect(rt.getState().cart.lines).toHaveLength(1);
@@ -316,19 +332,19 @@ describe('review round four: stale documents and the last check before a new int
     expect(rt.getState().interaction?.id).toBe('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
     expect(rt.getState().cart.lines).toHaveLength(0);
   });
-  it('finding 1: when the other document reset to idle, the restored document goes idle too', async () => {
+  it('when the other document reset to idle, the restored document goes idle too', async () => {
     await toPayment();
     sessionStorage.removeItem('webcheckout.interaction');
     window.dispatchEvent(new Event('pageshow'));
     expect(rt.getState().interaction).toBeNull();
   });
-  it('finding 1: a live document whose record is still current keeps everything', async () => {
+  it('a live document whose record is still current keeps everything', async () => {
     await toPayment();
     rt.actions.backToCart();
     window.dispatchEvent(new Event('pageshow'));
     expect(rt.getState().cart.lines).toHaveLength(1);
   });
-  it('finding 2: confirming again after a 422 checks the kept key first; found paid → confirmed with the recorded total, no second POST', async () => {
+  it('confirming again after a 422 checks the kept key first; found paid → confirmed with the recorded total, no second POST', async () => {
     ff.setPost(() => json(422, { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: IID, currentTotalMinor: 800, currentItems: [{ ...COFFEE, priceMinor: 400 }], affectedItemIds: [COFFEE.id] }));
     await toPayment();
     rt.actions.pay();
@@ -345,7 +361,7 @@ describe('review round four: stale documents and the last check before a new int
     expect(rt.getState().interaction?.phase).toBe('confirmed');
     expect(rt.getState().interaction?.submission?.recordedTotalMinor).toBe(700);
   });
-  it('finding 2: when the kept key is still not found, a new key is created and sent', async () => {
+  it('when the kept key is still not found, a new key is created and sent', async () => {
     ff.setPost(() => json(422, { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: IID, currentTotalMinor: 800, currentItems: [{ ...COFFEE, priceMinor: 400 }], affectedItemIds: [COFFEE.id] }));
     await toPayment();
     rt.actions.pay();
@@ -367,20 +383,7 @@ describe('review round four: stale documents and the last check before a new int
   });
 });
 
-describe('review round five: the last check, declined keys, polling ownership, abandoned continuations', () => {
-  const rejected422 = () => json(422, { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: IID, currentTotalMinor: 800, currentItems: [{ ...COFFEE, priceMinor: 400 }], affectedItemIds: [COFFEE.id] });
-
-  async function rejectedThenReview() {
-    ff.setPost(rejected422);
-    await toPayment();
-    rt.actions.pay();
-    await vi.advanceTimersByTimeAsync(10);
-    expect(rt.getState().interaction?.screen).toBe('rejected');
-    ff.setMenu(MENU.map((m) => (m.id === COFFEE.id ? { ...m, priceMinor: 400 } : m)));
-    rt.actions.tryAgain();
-    await vi.advanceTimersByTimeAsync(10);
-    expect(rt.getState().interaction?.screen).toBe('review');
-  }
+describe('the last check: failures, declined keys, polling ownership, abandoned continuations', () => {
 
   it.each([
     ['network failure', () => Promise.reject(new TypeError('Failed to fetch'))],
@@ -405,7 +408,7 @@ describe('review round five: the last check, declined keys, polling ownership, a
     expect(ff.posts()).toHaveLength(1);
   });
 
-  it('finding 2: Edit order after a decline discards the declined key; re-confirming is a new intent with the edited items', async () => {
+  it('Edit order after a decline discards the declined key; re-confirming is a new intent with the edited items', async () => {
     ff.setPost(() => json(201, orderStatus('failed')));
     await toPayment();
     rt.actions.pay();
@@ -428,7 +431,7 @@ describe('review round five: the last check, declined keys, polling ownership, a
     expect(rt.getState().interaction?.phase).toBe('confirmed');
   });
 
-  it('finding 3: adopting another attempt of the same interaction moves polling to the new key without a POST', async () => {
+  it('adopting another attempt of the same interaction moves polling to the new key without a POST', async () => {
     ff.setPost(() => new Promise<Response>(() => {}));
     await toPayment();
     rt.actions.pay();
@@ -448,7 +451,7 @@ describe('review round five: the last check, declined keys, polling ownership, a
     expect(ff.posts()).toHaveLength(1);
   });
 
-  it('finding 4: only one check runs at a time, and a check whose screen was left navigates nowhere', async () => {
+  it('only one check runs at a time, and a check whose screen was left navigates nowhere', async () => {
     await rejectedThenReview();
     const releases: (() => void)[] = [];
     ff.setGet(() => new Promise<Response>((r) => { releases.push(() => r(json(404, { error: 'not_found' }))); }));
@@ -470,20 +473,7 @@ describe('review round five: the last check, declined keys, polling ownership, a
   });
 });
 
-describe('review round six: unrecognised 404s, check identity, late menu updates, honest error copy', () => {
-  const rejected422 = () => json(422, { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: IID, currentTotalMinor: 800, currentItems: [{ ...COFFEE, priceMinor: 400 }], affectedItemIds: [COFFEE.id] });
-  const priced = () => MENU.map((m) => (m.id === COFFEE.id ? { ...m, priceMinor: 400 } : m));
-
-  async function rejectedThenReview() {
-    ff.setPost(rejected422);
-    await toPayment();
-    rt.actions.pay();
-    await vi.advanceTimersByTimeAsync(10);
-    ff.setMenu(priced());
-    rt.actions.tryAgain();
-    await vi.advanceTimersByTimeAsync(10);
-    expect(rt.getState().interaction?.screen).toBe('review');
-  }
+describe('the last check: unrecognised 404s and check identity; late menu updates; error copy', () => {
 
   it.each([
     ['HTML 404', () => new Response('<html>Not Found</html>', { status: 404, headers: { 'content-type': 'text/html' } })],
@@ -500,7 +490,7 @@ describe('review round six: unrecognised 404s, check identity, late menu updates
     expect(ff.posts()).toHaveLength(1);
   });
 
-  it('finding 2: leaving the review invalidates the check even if the customer returns before it completes', async () => {
+  it('leaving the review invalidates the check even if the customer returns before it completes', async () => {
     await rejectedThenReview();
     let release!: () => void;
     ff.setGet(() => new Promise<Response>((r) => { release = () => r(json(404, { error: 'not_found' })); }));
@@ -523,7 +513,7 @@ describe('review round six: unrecognised 404s, check identity, late menu updates
     expect(rt.getState().interaction?.submission?.idempotencyKey).toBe(K2);
   });
 
-  it('finding 2: a check from an ended interaction completing later does not clear the next interaction\'s check', async () => {
+  it('a check from an ended interaction completing later does not clear the next interaction\'s check', async () => {
     await rejectedThenReview();
     const releases: (() => void)[] = [];
     ff.setGet(() => new Promise<Response>((r) => { releases.push(() => r(json(404, { error: 'not_found' }))); }));
@@ -553,7 +543,7 @@ describe('review round six: unrecognised 404s, check identity, late menu updates
     expect(rt.getState().interaction?.screen).toBe('payment');
   });
 
-  it('finding 3: a late menu update that invalidates an unsent intent on the payment screen returns to the cart with the reason', async () => {
+  it('a late menu update that invalidates an unsent intent on the payment screen returns to the cart with the reason', async () => {
     // the first menu load succeeds; the refresh after Try again is held until the test releases it
     let releaseMenu!: () => void;
     let menuCalls = 0;
@@ -591,7 +581,7 @@ describe('review round six: unrecognised 404s, check identity, late menu updates
     expect(ff.posts()).toHaveLength(1); // nothing invalid was sent
   });
 
-  it('finding 4: a menu failure after a rejection keeps the key and does not claim nothing was charged', async () => {
+  it('a menu failure after a rejection keeps the key and does not claim nothing was charged', async () => {
     ff.setPost(rejected422);
     await toPayment();
     rt.actions.pay();

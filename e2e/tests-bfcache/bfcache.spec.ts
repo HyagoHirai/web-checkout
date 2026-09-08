@@ -16,7 +16,7 @@ async function persisted(page: Page): Promise<boolean | null> {
 }
 
 test.describe('back/forward cache (FR-028, SC-004)', () => {
-  test('finding 1: a document restored from bfcache never shows the cart of an interaction another document ended', async ({ page }) => {
+  test('a document restored from bfcache never shows the cart of an interaction another document ended', async ({ page }) => {
     await page.goto('/');
     await startAndAdd(page, [{ name: 'Coffee', times: 1 }]);
     await expect(page.locator('[data-line]')).toHaveCount(1);
@@ -36,7 +36,7 @@ test.describe('back/forward cache (FR-028, SC-004)', () => {
     expect(shown).toBe(b); // the restored document adopted the tab's current interaction and did not overwrite it
   });
 
-  test('finding 1: after a reset in another document, the restored document is idle', async ({ page }) => {
+  test('after a reset in another document, the restored document is idle', async ({ page }) => {
     await page.goto('/');
     await startAndAdd(page, [{ name: 'Coffee', times: 1 }]);
     await armPersistedProbe(page);

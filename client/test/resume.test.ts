@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { inactivityDeadline, waitEndedAt } from '../src/machine/deadlines.ts';
-import { canReview, reduce } from '../src/machine/reducer.ts';
-import { load, save } from '../src/machine/storage.ts';
+import { canReview } from '../src/machine/cart.ts';
+import { reduce } from '../src/machine/reducer.ts';
+import { isCurrent, load, save } from '../src/machine/storage.ts';
 import type { Interaction } from '../src/machine/types.ts';
 import { atPayment, COFFEE, IID, interactionOf, K1, MENU, response, run, submitted } from './helpers.ts';
 
@@ -9,7 +10,7 @@ import { atPayment, COFFEE, IID, interactionOf, K1, MENU, response, run, submitt
  * Review round three: the clock jumps while the app is suspended (bfcache, tab restore, laptop
  * lid), and the page reloads mid-flow. Every case here failed before the fix.
  */
-describe('finding 1: a suspended `submitted` interaction is normalised by the clock on resume', () => {
+describe('a suspended `submitted` interaction is normalised by the clock on resume', () => {
   const sent = submitted(0); // sentAt 0, lastActivityAt 0
   const record = interactionOf(sent);
 
@@ -49,7 +50,7 @@ describe('finding 1: a suspended `submitted` interaction is normalised by the cl
   });
 });
 
-describe('finding 2: revalidating a live interaction preserves the cart and screen state', () => {
+describe('revalidating a live interaction preserves the cart and screen state', () => {
   it('TICK (used by pageshow/visibility) keeps cart, rejection and error', () => {
     const s = run([
       { type: 'START', now: 0, interactionId: IID },
@@ -63,7 +64,7 @@ describe('finding 2: revalidating a live interaction preserves the cart and scre
   });
 });
 
-describe('finding 4: a reload before PAY discards the unsent intent (spec edge case)', () => {
+describe('a reload before PAY discards the unsent intent (spec edge case)', () => {
   it('RESUME of a building record on the payment screen returns to the menu with no submission', () => {
     const rec = interactionOf(atPayment(0));
     expect(rec.submission?.sentAt).toBeNull();
@@ -81,7 +82,7 @@ describe('finding 4: a reload before PAY discards the unsent intent (spec edge c
   });
 });
 
-describe('finding 5: a decline after a reload can be retried with the frozen lines', () => {
+describe('a decline after a reload can be retried with the frozen lines', () => {
   it('RESUME of a submitted record rebuilds the cart from the frozen lines; failed → Try again reaches review', () => {
     const rec = interactionOf(submitted(0));
     const restored = reduce({ ...submitted(0), interaction: null, cart: { lines: [], flagged: [] } }, { type: 'RESUME', now: 1_000, interaction: rec });
@@ -99,7 +100,7 @@ describe('finding 5: a decline after a reload can be retried with the frozen lin
   });
 });
 
-describe('finding 6: persisted records are validated as a union of valid states', () => {
+describe('persisted records are validated as a union of valid states', () => {
   const base = interactionOf(submitted(0));
   function persistedLoads(rec: unknown): boolean {
     sessionStorage.setItem('webcheckout.interaction', JSON.stringify(rec));
@@ -119,7 +120,7 @@ describe('finding 6: persisted records are validated as a union of valid states'
   });
 });
 
-describe('finding 7: unknown items are flagged and the menu is re-fetched on Review again', () => {
+describe('unknown items are flagged and the menu is re-fetched on Review again', () => {
   it('unknown_item flags the line and blocks review until it is removed', () => {
     const s = reduce(submitted(0), {
       type: 'RESPONSE', now: 1, source: 'post', interactionId: IID, idempotencyKey: K1,
@@ -138,5 +139,14 @@ describe('finding 7: unknown items are flagged and the menu is re-fetched on Rev
     const gone = reduce(again, { type: 'MENU_LOADED', now: 3, items: MENU.filter((m) => m.id !== COFFEE.id) });
     expect(gone.cart.flagged).toEqual([COFFEE.id]);
     expect(canReview(gone.cart, MENU)).toBe(false);
+  });
+});
+
+describe('isCurrent compares the live record with the stored one byte for byte', () => {
+  it('matches its own serialisation and nothing else', () => {
+    const i = interactionOf(submitted(0));
+    expect(isCurrent(i, JSON.stringify(i))).toBe(true);
+    expect(isCurrent(i, JSON.stringify({ ...i, id: '22222222-2222-4222-8222-222222222222' }))).toBe(false);
+    expect(isCurrent(i, null)).toBe(false);
   });
 });

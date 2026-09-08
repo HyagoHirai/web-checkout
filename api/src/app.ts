@@ -11,7 +11,8 @@ import type { ReferenceGenerator } from './domain/reference.ts';
 import { registerErrorHandling } from './plugins/errors.ts';
 import { healthRoutes } from './routes/health.ts';
 import { metricsRoutes } from './routes/metrics.ts';
-import { loadMenu, menuRoutes } from './routes/menu.ts';
+import { menuRoutes } from './routes/menu.ts';
+import { loadMenu } from './db/menu.ts';
 import { ordersRoutes } from './routes/orders.ts';
 import { eventsRoutes } from './routes/events.ts';
 
@@ -84,7 +85,7 @@ export function buildApp(opts: BuildAppOptions): App {
       counters,
       hooks: opts.hooks,
       referenceGenerator: opts.referenceGenerator,
-      loadMenu: () => loadMenu(app),
+      loadMenu: () => loadMenu(opts.pool),
     }),
   );
 

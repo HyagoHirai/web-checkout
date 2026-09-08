@@ -5,7 +5,9 @@
 
 export type Currency = 'USD';
 export type OrderState = 'pending_payment' | 'paid' | 'failed';
-export type SimulatedOutcome = 'success' | 'declined' | 'inconclusive';
+
+export const SIMULATED_OUTCOMES = ['success', 'declined', 'inconclusive'] as const;
+export type SimulatedOutcome = (typeof SIMULATED_OUTCOMES)[number];
 
 export interface MenuItem {
   id: string;
@@ -43,16 +45,18 @@ export interface OrderStatus {
   replay: boolean;
 }
 
-export type RejectionReason =
-  | 'price_mismatch'
-  | 'item_unavailable'
-  | 'unknown_item'
-  | 'duplicate_item'
-  | 'empty_cart'
-  | 'quantity_out_of_bounds'
-  | 'units_out_of_bounds'
-  | 'total_out_of_bounds'
-  | 'currency_unsupported';
+export const REJECTION_REASONS = [
+  'price_mismatch',
+  'item_unavailable',
+  'unknown_item',
+  'duplicate_item',
+  'empty_cart',
+  'quantity_out_of_bounds',
+  'units_out_of_bounds',
+  'total_out_of_bounds',
+  'currency_unsupported',
+] as const;
+export type RejectionReason = (typeof REJECTION_REASONS)[number];
 
 export interface ValidationRejection {
   error: 'validation_rejected';

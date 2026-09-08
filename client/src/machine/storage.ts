@@ -1,3 +1,4 @@
+import { SIMULATED_OUTCOMES } from '../../../shared/wire.ts';
 import { INTERACTION_FORMAT_VERSION, type Interaction } from './types.ts';
 
 const KEY = 'webcheckout.interaction';
@@ -33,7 +34,7 @@ export function isCurrent(i: Interaction, raw: string | null): boolean {
 const PHASES = new Set(['idle', 'building', 'submitted', 'confirmed', 'declined', 'unresolved']);
 const SCREENS = new Set(['menu', 'review', 'payment', 'rejected', 'error']);
 const KNOWN = new Set(['none', 'pending', 'paid', 'failed']);
-const OUTCOMES = new Set(['success', 'declined', 'inconclusive']);
+const OUTCOMES = new Set<string>(SIMULATED_OUTCOMES);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);

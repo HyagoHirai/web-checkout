@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ErrorScreen } from '../src/screens/Error.tsx';
 
-describe('finding 4: the error screen never claims nothing was charged while a sent key is kept', () => {
+describe('the error screen never claims nothing was charged while a retained key exists', () => {
   it('before any submission it may say nothing has been charged', () => {
     render(<ErrorScreen error={{ kind: 'menu_unreachable' }} hasKeptKey={false} onTryAgain={() => {}} onStartNew={() => {}} />);
     expect(screen.getByRole('alert').textContent).toMatch(/Nothing has been charged/);

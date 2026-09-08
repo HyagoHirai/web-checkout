@@ -1,11 +1,12 @@
-import type { OrderSubmission } from '../../../shared/wire.ts';
+import type { SimulatedOutcome } from '../../../shared/wire.ts';
 import { POLL_INTERVAL_MS } from '../../../shared/constants.ts';
 import { createApi, type Api } from '../api/client.ts';
 import { emit } from '../api/telemetry.ts';
 import { pollDueAt, waitEndedAt } from './deadlines.ts';
 import { initialState, reduce } from './reducer.ts';
 import { clear, isCurrent, load, readRaw, save } from './storage.ts';
-import type { Event, State } from './types.ts';
+import { retainedSubmission, toWire } from './submission.ts';
+import type { Event, State, Submission } from './types.ts';
 import { newUuid } from './uuid.ts';
 
 export interface RuntimeOptions {
@@ -117,18 +118,8 @@ export function createRuntime(opts: RuntimeOptions = {}) {
     }
   }
 
-  function toWire(sub: NonNullable<State['interaction']>['submission'] & object): OrderSubmission {
-    return {
-      idempotencyKey: sub.idempotencyKey,
-      currency: 'USD',
-      expectedTotalMinor: sub.expectedTotalMinor,
-      lines: sub.lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity })),
-      simulation: { outcome: sub.simulation },
-    };
-  }
-
   /** The POST is never aborted; its late result goes through the same admission rule as any other. */
-  async function sendPost(interactionId: string, sub: NonNullable<State['interaction']>['submission'] & object): Promise<void> {
+  async function sendPost(interactionId: string, sub: Submission): Promise<void> {
     const result = await api.postOrder(toWire(sub), interactionId);
     admit({ source: 'post', interactionId, idempotencyKey: sub.idempotencyKey, result });
   }
@@ -219,6 +210,46 @@ export function createRuntime(opts: RuntimeOptions = {}) {
     }
   }
 
+  /**
+   * Continue to payment. Ordinarily one dispatch. When a retained key exists (sent, rejected, outcome
+   * unknown) it is checked once more before a new intent replaces it (ADR-002 "The validation
+   * window"): one check at a time, identified, and admitted only while the review it started from is
+   * still current. Categories are handled explicitly:
+   *   outcome → the recorded state is applied;
+   *   404 with the API's own not_found body → the one case where "not found" permits a new intent;
+   *   anything else (network, 5xx, unrecognised body) → nothing is known, nothing new starts.
+   */
+  function continueToPayment(): void {
+    const i = state.interaction;
+    const retained = i && i.phase === 'building' ? retainedSubmission(i) : null;
+    if (!i || !retained) {
+      dispatch({ type: 'GO_PAYMENT', now: now(), idempotencyKey: uuid() });
+      return;
+    }
+    const checkId = ++checkSeq;
+    const before = state;
+    const after = dispatch({ type: 'CHECK_START', now: now(), checkId });
+    if (after === before) return; // a check is already in flight, or the screen is not the review
+    const interactionId = i.id;
+    const key = retained.idempotencyKey;
+    void api.lookupByKey(key, interactionId).then((result) => {
+      // Identity first: a check abandoned by any navigation, or belonging to an ended interaction,
+      // is dropped entirely and touches nothing (not even another check's flag).
+      if (state.activeCheck !== checkId) return;
+      if (result.category === 'outcome') {
+        dispatch({ type: 'CHECK_END', now: now(), checkId });
+        admit({ source: 'lookup', interactionId, idempotencyKey: key, result });
+        return;
+      }
+      if (result.category === 'unknown' && result.notFound) {
+        dispatch({ type: 'CHECK_END', now: now(), checkId });
+        dispatch({ type: 'GO_PAYMENT', now: now(), idempotencyKey: uuid() });
+        return;
+      }
+      dispatch({ type: 'CHECK_FAILED', now: now(), checkId });
+    });
+  }
+
   function stop(): void {
     if (ticker) clearInterval(ticker);
     ticker = null;
@@ -248,45 +279,9 @@ export function createRuntime(opts: RuntimeOptions = {}) {
       removeItem: (itemId: string) => dispatch({ type: 'REMOVE_ITEM', now: now(), itemId }),
       goReview: () => dispatch({ type: 'GO_REVIEW', now: now() }),
       goMenu: () => dispatch({ type: 'GO_MENU', now: now() }),
-      goPayment: () => {
-        const i = state.interaction;
-        const kept = i && i.phase === 'building' && i.submission && i.submission.sentAt !== null && i.submission.knownState === 'none' ? i.submission : null;
-        if (!i || !kept) {
-          dispatch({ type: 'GO_PAYMENT', now: now(), idempotencyKey: uuid() });
-          return;
-        }
-        // A sent-and-rejected key with no known outcome is checked once more before a new intent
-        // replaces it (ADR-002 "The validation window"). One check at a time. Its continuation is
-        // admitted only if the review screen it started from is still current and the kept key is
-        // still the same object. Categories are handled explicitly:
-        //   outcome   → the recorded state is applied;
-        //   404       → the one case where "not found" permits a new intent (FR-009 must be possible);
-        //   anything else (network, 5xx, unrecognised body) → nothing is known, nothing new starts.
-        const checkId = ++checkSeq;
-        const before = state;
-        const after = dispatch({ type: 'CHECK_START', now: now(), checkId });
-        if (after === before) return; // a check is already in flight, or the screen is not the review
-        const interactionId = i.id;
-        const key = kept.idempotencyKey;
-        void api.lookupByKey(key, interactionId).then((result) => {
-          // Identity first: a check abandoned by any navigation, or belonging to an ended interaction,
-          // is dropped entirely and touches nothing (not even another check's flag).
-          if (state.activeCheck !== checkId) return;
-          if (result.category === 'outcome') {
-            dispatch({ type: 'CHECK_END', now: now(), checkId });
-            admit({ source: 'lookup', interactionId, idempotencyKey: key, result });
-            return;
-          }
-          if (result.category === 'unknown' && result.notFound) {
-            dispatch({ type: 'CHECK_END', now: now(), checkId });
-            dispatch({ type: 'GO_PAYMENT', now: now(), idempotencyKey: uuid() });
-            return;
-          }
-          dispatch({ type: 'CHECK_FAILED', now: now(), checkId });
-        });
-      },
+      goPayment: continueToPayment,
       backToCart: () => dispatch({ type: 'BACK_TO_CART', now: now() }),
-      setSimulation: (outcome: 'success' | 'declined' | 'inconclusive') => dispatch({ type: 'SET_SIMULATION', now: now(), outcome }),
+      setSimulation: (outcome: SimulatedOutcome) => dispatch({ type: 'SET_SIMULATION', now: now(), outcome }),
       pay: () => dispatch({ type: 'PAY', now: now() }),
       continueSession: () => dispatch({ type: 'CONTINUE', now: now() }),
       retryAfterError: () => {

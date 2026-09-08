@@ -23,9 +23,15 @@ function isMenuResponse(v: unknown): v is MenuResponse {
   return !!o && typeof o === 'object' && o.currency === 'USD' && Array.isArray(o.items) && o.items.every(isMenuItem);
 }
 
+/** Validates every field the reducer consumes, including the optional ones. */
 function isRejection(v: unknown): v is ValidationRejection {
   const o = v as Record<string, unknown> | null;
-  return !!o && typeof o === 'object' && o.error === 'validation_rejected' && Array.isArray(o.reasons);
+  if (!o || typeof o !== 'object' || o.error !== 'validation_rejected') return false;
+  if (!Array.isArray(o.reasons) || !o.reasons.every((r) => typeof r === 'string')) return false;
+  if (o.currentTotalMinor !== undefined && !Number.isInteger(o.currentTotalMinor)) return false;
+  if (o.affectedItemIds !== undefined && !(Array.isArray(o.affectedItemIds) && o.affectedItemIds.every((id) => typeof id === 'string'))) return false;
+  if (o.currentItems !== undefined && !(Array.isArray(o.currentItems) && o.currentItems.every(isMenuItem))) return false;
+  return true;
 }
 
 /**
@@ -59,7 +65,7 @@ export function createApi(fetchImpl: Fetch = (...a) => fetch(...a)) {
       if (!isMenuResponse(body)) throw new Error('menu: unrecognised body');
       return body;
     },
-    /** Never aborted by the caller (research R10). Rejects only on a network failure. */
+    /** Never aborted by the caller (research R10). Never throws: a network failure is returned as `unknown`. */
     async postOrder(submission: OrderSubmission, interactionId: string): Promise<Classified> {
       try {
         const res = await fetchImpl('/api/orders', {

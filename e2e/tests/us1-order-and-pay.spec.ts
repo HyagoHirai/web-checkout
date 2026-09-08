@@ -65,7 +65,7 @@ test.describe('US1: order and pay at the kiosk', () => {
   });
 });
 
-test('round seven: order limits are explained on screen, not in a tooltip (FR-006)', async ({ page }) => {
+test('order limits are explained on screen, not in a tooltip (FR-006)', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Start your order' }).tap();
   // 5 items × 10 = 50 units, the order maximum

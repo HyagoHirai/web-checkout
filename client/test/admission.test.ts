@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { reduce } from '../src/machine/reducer.ts';
-import { IID, IID2, K1, K2, interactionOf, response, run, submitted } from './helpers.ts';
+import { atPayment, COFFEE, IID, IID2, K1, K2, interactionOf, response, run, status, submitted } from './helpers.ts';
+import type { Classified } from '../src/machine/types.ts';
 
 const t = 1000;
 
@@ -63,3 +64,89 @@ describe('US9: the five-condition response admission rule (FR-032..FR-034)', () 
     expect(poll404).toBe(early);
   });
 });
+
+function rejected(priceNow: number) {
+  return reduce(submitted(t), {
+    type: 'RESPONSE', now: t + 1, source: 'post', interactionId: IID, idempotencyKey: K1,
+    result: { category: 'rejected', rejection: { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: IID, currentTotalMinor: priceNow * 2, currentItems: [{ ...COFFEE, priceMinor: priceNow }], affectedItemIds: [COFFEE.id] } },
+  });
+}
+
+describe('a rejected key is retained until a new intent replaces it (ADR-002 "The validation window")', () => {
+  it('after a 422 the key is kept, cannot be re-sent, and a later paid for it is admitted with the recorded total', () => {
+    const s = rejected(400);
+    expect(interactionOf(s).submission?.idempotencyKey).toBe(K1);
+    const later = response(s, { now: t + 5000, state: 'paid', source: 'lookup' });
+    expect(interactionOf(later).phase).toBe('confirmed');
+    expect(interactionOf(later).submission?.recordedTotalMinor).toBe(700);
+    expect(later.rejection).toBeNull();
+  });
+  it('a later pending for the kept key goes to unresolved (S7a); a failed goes to declined', () => {
+    const pending = response(rejected(400), { now: t + 5000, state: 'pending_payment', source: 'lookup', reference: 'PEND' });
+    expect(interactionOf(pending).phase).toBe('unresolved');
+    expect(interactionOf(pending).submission?.knownState).toBe('pending');
+    const failed = response(rejected(400), { now: t + 5000, state: 'failed', source: 'lookup' });
+    expect(interactionOf(failed).phase).toBe('declined');
+  });
+  it('the kept key survives editing the cart and a reload; an unsent key does not', () => {
+    const edited = run([{ type: 'TRY_AGAIN', now: t + 2 }, { type: 'GO_MENU', now: t + 3 }, { type: 'ADD_ITEM', now: t + 4, itemId: COFFEE.id }], rejected(400));
+    expect(interactionOf(edited).submission?.idempotencyKey).toBe(K1);
+    const reloaded = reduce({ ...edited, interaction: null }, { type: 'RESUME', now: t + 10, interaction: interactionOf(edited) });
+    expect(interactionOf(reloaded).submission?.idempotencyKey).toBe(K1);
+    const unsent = reduce({ ...atPayment(t), interaction: null }, { type: 'RESUME', now: t + 10, interaction: interactionOf(atPayment(t)) });
+    expect(interactionOf(unsent).submission).toBeNull();
+  });
+  it('a new intent replaces the kept key at GO_PAYMENT', () => {
+    const again = run([{ type: 'TRY_AGAIN', now: t + 2 }, { type: 'GO_PAYMENT', now: t + 3, idempotencyKey: K2 }], rejected(400));
+    expect(interactionOf(again).submission?.idempotencyKey).toBe(K2);
+    expect(interactionOf(again).submission?.expectedTotalMinor).toBe(800);
+    // and K1's late result is now foreign to the live attempt
+    expect(response(again, { now: t + 4, state: 'paid', idempotencyKey: K1, source: 'lookup' })).toBe(again);
+  });
+});
+
+
+describe('a lookup after a 409 shows the recorded total, not the conflicting attempt', () => {
+  it('confirmed carries recordedTotalMinor from the lookup while the frozen intent keeps what it sent', () => {
+    const s = submitted(t); // expected 700
+    const looked = reduce(s, { type: 'RESPONSE', now: t + 1, source: 'lookup', interactionId: IID, idempotencyKey: K1, result: { category: 'outcome', status: status('paid', { totalMinor: 350, reference: 'OLDR' }) } });
+    expect(interactionOf(looked).phase).toBe('confirmed');
+    expect(interactionOf(looked).submission?.recordedTotalMinor).toBe(350);
+    expect(interactionOf(looked).submission?.expectedTotalMinor).toBe(700);
+    expect(interactionOf(looked).submission?.reference).toBe('OLDR');
+  });
+});
+
+
+const REJECTED: Classified = { category: 'rejected', rejection: { error: 'validation_rejected', reasons: ['price_mismatch'], interactionId: IID, currentTotalMinor: 800, currentItems: [{ ...COFFEE, priceMinor: 400 }], affectedItemIds: [COFFEE.id] } };
+
+describe('a rejection that arrives after the intent is known to exist is stale and admits nothing (FR-033)', () => {
+  const pending = response(submitted(t), { now: t + 500, state: 'pending_payment', source: 'poll', reference: 'PEND' });
+
+  it.each([
+    ['422', REJECTED],
+    ['400', { category: 'bad_request' } as Classified],
+    ['503 reference_exhausted', { category: 'reference_exhausted' } as Classified],
+  ])('a late %s after a pending poll leaves submitted/pending intact, keeps K1, and Try again is impossible', (_n, result) => {
+    expect(interactionOf(pending).submission?.knownState).toBe('pending');
+    const after = reduce(pending, { type: 'RESPONSE', now: t + 900, source: 'post', interactionId: IID, idempotencyKey: K1, result });
+    expect(after).toBe(pending);
+    expect(interactionOf(after).phase).toBe('submitted');
+    expect(interactionOf(after).submission?.idempotencyKey).toBe(K1);
+    expect(reduce(after, { type: 'TRY_AGAIN', now: t + 1000 })).toBe(after);
+    expect(reduce(after, { type: 'GO_PAYMENT', now: t + 1000, idempotencyKey: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' })).toBe(after);
+  });
+
+  it('the deadlines continue from the polling already in progress', () => {
+    const after = reduce(pending, { type: 'RESPONSE', now: t + 900, source: 'post', interactionId: IID, idempotencyKey: K1, result: REJECTED });
+    const done = reduce(after, { type: 'TICK', now: t + 500 + 30_000 });
+    expect(interactionOf(done).phase).toBe('unresolved');
+    expect(interactionOf(done).submission?.reference).toBe('PEND');
+  });
+
+  it('a rejection with no known acceptance is still admitted (the ordinary FR-009 path)', () => {
+    const after = reduce(submitted(t), { type: 'RESPONSE', now: t + 1, source: 'post', interactionId: IID, idempotencyKey: K1, result: REJECTED });
+    expect(interactionOf(after).screen).toBe('rejected');
+  });
+});
+

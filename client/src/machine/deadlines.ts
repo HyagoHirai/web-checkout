@@ -69,10 +69,3 @@ export function isExpired(i: Interaction, now: number): boolean {
   const d = inactivityDeadline(i);
   return d !== null && now >= d;
 }
-
-/** In `submitted`, the moment the bounded wait is over and the phase must become `unresolved`. */
-export function waitIsOver(i: Interaction, now: number): boolean {
-  if (i.phase !== 'submitted' || !i.submission) return false;
-  const end = waitEndedAt(i.submission);
-  return end !== null && now >= end;
-}

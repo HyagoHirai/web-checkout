@@ -1,9 +1,4 @@
-import { CLIENT_EVENT_NAMES } from '../../../shared/wire.ts';
-
-const REJECTION_REASONS = [
-  'price_mismatch', 'item_unavailable', 'unknown_item', 'duplicate_item', 'empty_cart',
-  'quantity_out_of_bounds', 'units_out_of_bounds', 'total_out_of_bounds', 'currency_unsupported',
-] as const;
+import { CLIENT_EVENT_NAMES, REJECTION_REASONS, SIMULATED_OUTCOMES } from '../../../shared/wire.ts';
 
 /** The full catalogue from research R13. Every key exists at 0 so /api/metrics has a stable shape. */
 export const COUNTER_NAMES: readonly string[] = [
@@ -13,9 +8,7 @@ export const COUNTER_NAMES: readonly string[] = [
   'orders.replayed.pending_payment',
   ...REJECTION_REASONS.map((r) => `orders.validation_rejected.${r}`),
   'orders.intent_mismatch',
-  'payment.executed.success',
-  'payment.executed.declined',
-  'payment.executed.inconclusive',
+  ...SIMULATED_OUTCOMES.map((o) => `payment.executed.${o}`),
   'payment.outcome_recorded',
   'payment.outcome_record_failed',
   'payment.post_commit_exception',

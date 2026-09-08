@@ -23,7 +23,7 @@ test('US6: a decline keeps the items; trying again is a new order; the first sta
   expect(delta(before, after, 'orders.accepted')).toBe(2);
 });
 
-test('finding 2 (round five): Edit order after a decline, then re-confirm, is a new intent with the edited items; the first stays failed', async ({ page }) => {
+test('Edit order after a decline, then re-confirm, is a new intent with the edited items; the first stays failed', async ({ page }) => {
   const before = await metrics(page);
   await page.goto('/');
   await startAndAdd(page, [{ name: 'Coffee', times: 1 }]);
@@ -47,7 +47,7 @@ test('finding 2 (round five): Edit order after a decline, then re-confirm, is a 
   expect(delta(before, after, 'orders.accepted')).toBe(2);
 });
 
-test('finding 3 (round six): a menu refresh that finishes on the payment screen with an item unavailable returns to the cart, flagged, and sends nothing', async ({ page }) => {
+test('a menu refresh that finishes on the payment screen with an item unavailable returns to the cart, flagged, and sends nothing', async ({ page }) => {
   await page.goto('/');
   await startAndAdd(page, [{ name: 'Coffee', times: 1 }, { name: 'Latte', times: 1 }]);
   await goToPayment(page);

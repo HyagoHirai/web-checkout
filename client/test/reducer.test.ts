@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { canReview, cartTotalMinor, reduce } from '../src/machine/reducer.ts';
-import { atPayment, COFFEE, IID, K1, K2, LATTE, MENU, PRICEY, run, SOUP, submitted, interactionOf } from './helpers.ts';
+import { canReview, cartBlocker, cartTotalMinor } from '../src/machine/cart.ts';
+import { reduce } from '../src/machine/reducer.ts';
+import type { Classified } from '../src/machine/types.ts';
+import { atPayment, COFFEE, IID, K1, K2, LATTE, MENU, PRICEY, response, run, SOUP, submitted, interactionOf } from './helpers.ts';
 
 const t = 1000;
 
@@ -22,7 +24,7 @@ describe('US1: cart rules (FR-002..FR-006)', () => {
     const s = reduce(started, { type: 'ADD_ITEM', now: t, itemId: SOUP.id });
     expect(s.cart.lines).toHaveLength(0);
   });
-  it('an eleventh of one item, a 51st unit and a total above $1,000 are refused', () => {
+  it('an eleventh of one item and a total above $1,000 are refused', () => {
     let s = reduce(started, { type: 'SET_QTY', now: t, itemId: COFFEE.id, quantity: 10 });
     expect(s.cart.lines[0].quantity).toBe(10);
     s = reduce(s, { type: 'ADD_ITEM', now: t, itemId: COFFEE.id });
@@ -32,6 +34,17 @@ describe('US1: cart rules (FR-002..FR-006)', () => {
     expect(s.cart.lines.find((l) => l.itemId === PRICEY.id)).toBeUndefined();
     s = reduce(s, { type: 'SET_QTY', now: t, itemId: PRICEY.id, quantity: 4 }); // 3500+4750+80000 = 88250
     expect(s.cart.lines.find((l) => l.itemId === PRICEY.id)?.quantity).toBe(4);
+  });
+  it('a 51st unit is refused while 50 are accepted (FR-006)', () => {
+    // six cheap items so the unit cap is reached long before the total cap
+    const cheap = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6'].map((n, k) => ({ id: `0a1d2c3b-00${k + 5}0-4a5b-8c6d-0000000000${k + 5}0`, name: n, priceMinor: 100, currency: 'USD' as const, available: true }));
+    let s = run([{ type: 'START', now: t, interactionId: IID }, { type: 'MENU_LOADED', now: t, items: cheap }]);
+    for (const m of cheap.slice(0, 5)) s = reduce(s, { type: 'SET_QTY', now: t, itemId: m.id, quantity: 10 });
+    expect(s.cart.lines.reduce((n, l) => n + l.quantity, 0)).toBe(50);
+    expect(canReview(s.cart, s.menu)).toBe(true); // 50 is allowed
+    const over = reduce(s, { type: 'ADD_ITEM', now: t, itemId: cheap[5].id });
+    expect(over.cart.lines.find((l) => l.itemId === cheap[5].id)).toBeUndefined(); // the 51st is refused
+    expect(cartBlocker(over.cart, over.menu)).toBeNull(); // and the cart stays valid
   });
   it('review is blocked on an empty cart and on a flagged line', () => {
     expect(canReview(started.cart, MENU)).toBe(false);
@@ -136,5 +149,67 @@ describe('US5: activity whitelist and expiry (FR-027, FR-028)', () => {
     const u = reduce(s, { type: 'TICK', now: t + 38_000 });
     expect(interactionOf(u).phase).toBe('unresolved');
     expect(interactionOf(u).lastActivityAt).toBe(t);
+  });
+});
+
+describe('re-pricing can push a valid cart over a bound; the client refuses to freeze or send it (FR-006)', () => {
+  it('a 422 that re-prices the total above $1,000.00 blocks review, GO_PAYMENT and PAY until the order is reduced', () => {
+    const big = run([
+      { type: 'START', now: t, interactionId: IID },
+      { type: 'MENU_LOADED', now: t, items: MENU },
+      { type: 'SET_QTY', now: t, itemId: PRICEY.id, quantity: 5 }, // 5 × $200 = $1,000.00 exactly
+      { type: 'GO_REVIEW', now: t },
+      { type: 'GO_PAYMENT', now: t, idempotencyKey: K1 },
+      { type: 'PAY', now: t },
+    ]);
+    expect(interactionOf(big).phase).toBe('submitted');
+    const s = reduce(big, {
+      type: 'RESPONSE', now: t + 1, source: 'post', interactionId: IID, idempotencyKey: K1,
+      result: { category: 'rejected', rejection: { error: 'validation_rejected', reasons: ['price_mismatch', 'total_out_of_bounds'], interactionId: IID, currentTotalMinor: 101_000, currentItems: [{ ...PRICEY, priceMinor: 20_200 }], affectedItemIds: [PRICEY.id] } },
+    });
+    expect(cartBlocker(s.cart, s.menu)).toBe('total_out_of_bounds');
+    expect(canReview(s.cart, s.menu)).toBe(false);
+    const tryAgain = reduce(s, { type: 'TRY_AGAIN', now: t + 2 });
+    expect(interactionOf(tryAgain).screen).toBe('menu');
+    expect(reduce(tryAgain, { type: 'GO_REVIEW', now: t + 3 })).toBe(tryAgain);
+    expect(reduce(tryAgain, { type: 'GO_PAYMENT', now: t + 3, idempotencyKey: K2 })).toBe(tryAgain);
+    const reduced = reduce(tryAgain, { type: 'SET_QTY', now: t + 4, itemId: PRICEY.id, quantity: 4 });
+    expect(canReview(reduced.cart, reduced.menu)).toBe(true);
+  });
+});
+
+
+describe('a menu failure outside building clears the loading flag so later refreshes can start', () => {
+  it('MENU_FAILED while submitted clears menuLoading without touching the screen', () => {
+    const s = { ...submitted(t), menuLoading: true };
+    const after = reduce(s, { type: 'MENU_FAILED', now: t + 1 });
+    expect(after.menuLoading).toBe(false);
+    expect(interactionOf(after).phase).toBe('submitted');
+    expect(after.error).toBeNull();
+    // a later Try again from a decline requests a refresh again (false → true)
+    const declined = response(after, { now: t + 2, state: 'failed' });
+    const retry = reduce(declined, { type: 'TRY_AGAIN', now: t + 3 });
+    expect(retry.menuLoading).toBe(true);
+  });
+});
+
+
+describe('decrements always apply, even while the cart is above a bound (FR-006)', () => {
+  it('a re-pricing that needs two decrements to get under the cap allows each of them', () => {
+    const big = run([
+      { type: 'START', now: t, interactionId: IID },
+      { type: 'MENU_LOADED', now: t, items: MENU },
+      { type: 'SET_QTY', now: t, itemId: PRICEY.id, quantity: 5 }, // $1,000.00
+    ]);
+    const repriced = reduce(big, { type: 'MENU_LOADED', now: t + 1, items: MENU.map((m) => (m.id === PRICEY.id ? { ...m, priceMinor: 30_000 } : m)) }); // $1,500.00
+    expect(canReview(repriced.cart, repriced.menu)).toBe(false);
+    const four = reduce(repriced, { type: 'SET_QTY', now: t + 2, itemId: PRICEY.id, quantity: 4 }); // $1,200.00, still over
+    expect(four.cart.lines[0].quantity).toBe(4);
+    expect(canReview(four.cart, four.menu)).toBe(false);
+    const three = reduce(four, { type: 'SET_QTY', now: t + 3, itemId: PRICEY.id, quantity: 3 }); // $900.00
+    expect(three.cart.lines[0].quantity).toBe(3);
+    expect(canReview(three.cart, three.menu)).toBe(true);
+    // increments are still refused above the cap
+    expect(reduce(four, { type: 'SET_QTY', now: t + 4, itemId: PRICEY.id, quantity: 5 }).cart.lines[0].quantity).toBe(4);
   });
 });

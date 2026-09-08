@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from 'react';
-import { warningAt, inactivityDeadline } from './machine/deadlines.ts';
+import { cartTotalMinor } from './machine/cart.ts';
+import { inactivityDeadline, warningAt } from './machine/deadlines.ts';
 import type { Runtime } from './machine/runtime.ts';
-import { cartTotalMinor } from './machine/reducer.ts';
+import { retainedSubmission } from './machine/submission.ts';
 import { Idle } from './screens/Idle.tsx';
 import { Menu } from './screens/Menu.tsx';
 import { Review } from './screens/Review.tsx';
@@ -14,75 +15,76 @@ import { Rejected } from './screens/Rejected.tsx';
 import { ErrorScreen } from './screens/Error.tsx';
 import { InactivityWarning } from './screens/InactivityWarning.tsx';
 
+/** Maps the store's phase and screen to one screen component. Screens receive data and callbacks only. */
 export function App({ runtime }: { runtime: Runtime }) {
   const state = useSyncExternalStore(runtime.subscribe, runtime.getState, runtime.getState);
-  const a = runtime.actions;
-  const i = state.interaction;
+  const actions = runtime.actions;
+  const interaction = state.interaction;
 
-  if (!i || i.phase === 'idle') return <Idle onStart={a.start} />;
+  if (!interaction || interaction.phase === 'idle') return <Idle onStart={actions.start} />;
 
-  const warnAt = warningAt(i);
-  const deadline = inactivityDeadline(i);
-  const showWarning = warnAt !== null && deadline !== null && state.now >= warnAt && i.phase !== 'confirmed';
+  const warnAt = warningAt(interaction);
+  const deadline = inactivityDeadline(interaction);
+  const showWarning = warnAt !== null && deadline !== null && state.now >= warnAt && interaction.phase !== 'confirmed';
   const secondsLeft = deadline === null ? 0 : Math.max(0, Math.ceil((deadline - state.now) / 1000));
+  const submission = interaction.submission;
+  const recordedOrExpected = submission?.recordedTotalMinor ?? submission?.expectedTotalMinor ?? 0;
+
+  const menuScreen = (
+    <Menu menu={state.menu} loading={state.menuLoading} cart={state.cart} onAdd={actions.addItem} onSetQty={actions.setQty} onRemove={actions.removeItem} onReview={actions.goReview} onStartNew={actions.startNewOrder} />
+  );
 
   let screen: React.ReactNode;
-  switch (i.phase) {
+  switch (interaction.phase) {
     case 'submitted':
-      screen = <Waiting onStartNew={a.startNewOrder} />;
+      screen = <Waiting onStartNew={actions.startNewOrder} />;
       break;
     case 'confirmed':
-      screen = <Confirmed reference={i.submission?.reference ?? ''} totalMinor={i.submission?.recordedTotalMinor ?? i.submission?.expectedTotalMinor ?? 0} onDone={a.done} />;
+      screen = <Confirmed reference={submission?.reference ?? ''} totalMinor={recordedOrExpected} onDone={actions.done} />;
       break;
     case 'declined':
-      screen = <Declined lines={i.submission?.lines ?? []} totalMinor={i.submission?.recordedTotalMinor ?? i.submission?.expectedTotalMinor ?? 0} onTryAgain={a.tryAgain} onEdit={a.goMenu} onStartNew={a.startNewOrder} />;
+      screen = <Declined lines={submission?.lines ?? []} totalMinor={recordedOrExpected} onTryAgain={actions.tryAgain} onEdit={actions.goMenu} onStartNew={actions.startNewOrder} />;
       break;
     case 'unresolved':
-      screen = <Unresolved knownState={i.submission?.knownState === 'pending' ? 'pending' : 'none'} reference={i.submission?.reference ?? null} onStartNew={a.startNewOrder} />;
+      screen = <Unresolved knownState={submission?.knownState === 'pending' ? 'pending' : 'none'} reference={submission?.reference ?? null} onStartNew={actions.startNewOrder} />;
       break;
     case 'building':
-      switch (i.screen) {
+      switch (interaction.screen) {
         case 'review':
-          screen = <Review menu={state.menu} cart={state.cart} checking={state.activeCheck !== null} onConfirm={a.goPayment} onBack={a.goMenu} onStartNew={a.startNewOrder} />;
+          screen = <Review menu={state.menu} cart={state.cart} checking={state.activeCheck !== null} onConfirm={actions.goPayment} onBack={actions.goMenu} onStartNew={actions.startNewOrder} />;
           break;
         case 'payment':
           screen = (
             <Payment
-              totalMinor={i.submission?.expectedTotalMinor ?? cartTotalMinor(state.cart, state.menu)}
-              simulation={i.submission?.simulation ?? 'success'}
-              onSetSimulation={a.setSimulation}
-              onPay={a.pay}
-              onBack={a.backToCart}
-              onStartNew={a.startNewOrder}
+              totalMinor={submission?.expectedTotalMinor ?? cartTotalMinor(state.cart, state.menu)}
+              simulation={submission?.simulation ?? 'success'}
+              onSetSimulation={actions.setSimulation}
+              onPay={actions.pay}
+              onBack={actions.backToCart}
+              onStartNew={actions.startNewOrder}
             />
           );
           break;
         case 'rejected':
-          screen = state.rejection ? (
-            <Rejected rejection={state.rejection} menu={state.menu} cart={state.cart} onReviewAgain={a.tryAgain} onStartNew={a.startNewOrder} />
-          ) : (
-            <Menu menu={state.menu} loading={state.menuLoading} cart={state.cart} onAdd={a.addItem} onSetQty={a.setQty} onRemove={a.removeItem} onReview={a.goReview} onStartNew={a.startNewOrder} />
-          );
+          screen = state.rejection ? <Rejected rejection={state.rejection} menu={state.menu} cart={state.cart} onReviewAgain={actions.tryAgain} onStartNew={actions.startNewOrder} /> : menuScreen;
           break;
         case 'error':
           screen = state.error ? (
-            <ErrorScreen error={state.error} hasKeptKey={i.submission !== null && i.submission.sentAt !== null && i.submission.knownState === 'none'} onTryAgain={a.retryAfterError} onStartNew={a.startNewOrder} />
-          ) : (
-            <Menu menu={state.menu} loading={state.menuLoading} cart={state.cart} onAdd={a.addItem} onSetQty={a.setQty} onRemove={a.removeItem} onReview={a.goReview} onStartNew={a.startNewOrder} />
-          );
+            <ErrorScreen error={state.error} hasKeptKey={retainedSubmission(interaction) !== null} onTryAgain={actions.retryAfterError} onStartNew={actions.startNewOrder} />
+          ) : menuScreen;
           break;
         default:
-          screen = <Menu menu={state.menu} loading={state.menuLoading} cart={state.cart} onAdd={a.addItem} onSetQty={a.setQty} onRemove={a.removeItem} onReview={a.goReview} onStartNew={a.startNewOrder} />;
+          screen = menuScreen;
       }
       break;
     default:
-      screen = <Idle onStart={a.start} />;
+      screen = <Idle onStart={actions.start} />;
   }
 
   return (
     <>
       {screen}
-      {showWarning && <InactivityWarning secondsLeft={secondsLeft} onContinue={a.continueSession} onStartNew={a.startNewOrder} />}
+      {showWarning && <InactivityWarning secondsLeft={secondsLeft} onContinue={actions.continueSession} onStartNew={actions.startNewOrder} />}
     </>
   );
 }

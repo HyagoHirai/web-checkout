@@ -1,4 +1,4 @@
-import type { SimulatedOutcome } from '../../shared/wire.ts';
+import { SIMULATED_OUTCOMES, type SimulatedOutcome } from '../../shared/wire.ts';
 
 export interface Config {
   databaseUrl: string;
@@ -9,7 +9,6 @@ export interface Config {
   simulatorLatencyMs: number;
 }
 
-const OUTCOMES: readonly SimulatedOutcome[] = ['success', 'declined', 'inconclusive'];
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
   const v = env[name];
@@ -27,8 +26,8 @@ function intOr(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const outcome = (env.SIMULATOR_DEFAULT_OUTCOME ?? 'success') as SimulatedOutcome;
-  if (!OUTCOMES.includes(outcome)) {
-    throw new Error(`SIMULATOR_DEFAULT_OUTCOME must be one of ${OUTCOMES.join(', ')}, got ${JSON.stringify(outcome)}`);
+  if (!SIMULATED_OUTCOMES.includes(outcome)) {
+    throw new Error(`SIMULATOR_DEFAULT_OUTCOME must be one of ${SIMULATED_OUTCOMES.join(', ')}, got ${JSON.stringify(outcome)}`);
   }
   const hint = env.SIMULATOR_CLIENT_HINT ?? 'allow';
   if (hint !== 'allow' && hint !== 'ignore') {

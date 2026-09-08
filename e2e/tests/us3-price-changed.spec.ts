@@ -32,7 +32,7 @@ test('US3: a price change that moves the total is rejected before payment; re-co
   expect(delta(before, after, 'orders.accepted')).toBe(1);
 });
 
-test('finding 3: a re-pricing that pushes the total above $1,000.00 blocks confirmation on the client until the order is reduced (FR-006)', async ({ page }) => {
+test('a re-pricing that pushes the total above $1,000.00 blocks confirmation on the client until the order is reduced (FR-006)', async ({ page }) => {
   await page.goto('/');
   // 5 sandwiches at $200.00 = exactly $1,000.00 is allowed; the fixture then raises the price
   await withMenuChange([{ slug: 'sandwich', priceMinor: 20_000 }], async () => {
@@ -55,7 +55,7 @@ test('finding 3: a re-pricing that pushes the total above $1,000.00 blocks confi
   });
 });
 
-test('finding 2: after a rejection, confirming again first checks the rejected key; a concurrent acceptance is shown, not re-paid', async ({ page }) => {
+test('after a rejection, confirming again first checks the rejected key; a concurrent acceptance is shown, not re-paid', async ({ page }) => {
   const before = await metrics(page);
   await page.goto('/');
   await startAndAdd(page, [{ name: 'Coffee', times: 2 }]);
@@ -81,7 +81,7 @@ test('finding 2: after a rejection, confirming again first checks the rejected k
   expect(delta(before, after, 'payment.executed.success')).toBe(1);
 });
 
-test('finding 1 (round five): when the last check of a rejected key fails, no new payment is offered; a retry that finds the order shows it', async ({ page }) => {
+test('when the last check of a rejected key fails, no new payment is offered; a retry that finds the order shows it', async ({ page }) => {
   const before = await metrics(page);
   await page.goto('/');
   await startAndAdd(page, [{ name: 'Coffee', times: 2 }]);
@@ -113,7 +113,7 @@ test('finding 1 (round five): when the last check of a rejected key fails, no ne
   expect(delta(before, after, 'payment.executed.success')).toBe(1);
 });
 
-test('finding 1 (round six): a 404 that is not the API\'s not_found body keeps the key and starts nothing', async ({ page }) => {
+test('a 404 that is not the API\'s not_found body keeps the key and starts nothing', async ({ page }) => {
   const before = await metrics(page);
   await page.goto('/');
   await startAndAdd(page, [{ name: 'Coffee', times: 2 }]);
@@ -140,7 +140,7 @@ test('finding 1 (round six): a 404 that is not the API\'s not_found body keeps t
   expect(delta(before, after, 'orders.accepted')).toBe(1);
 });
 
-test('round seven: a re-pricing that needs two decrements can be reduced step by step', async ({ page }) => {
+test('a re-pricing that needs two decrements can be reduced step by step', async ({ page }) => {
   await page.goto('/');
   await withMenuChange([{ slug: 'sandwich', priceMinor: 20_000 }], async () => {
     await page.getByRole('button', { name: 'Start your order' }).tap();

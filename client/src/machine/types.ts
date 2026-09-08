@@ -2,7 +2,7 @@ import type { MenuItem, OrderState, OrderStatus, RejectionReason, SimulatedOutco
 
 export type Phase = 'idle' | 'building' | 'submitted' | 'confirmed' | 'declined' | 'unresolved';
 
-/** Which screen the building phase shows. Persisted so a reload lands on the same screen. */
+/** Which screen the building phase shows. Persisted with the record; hydration after a reload returns to the menu. */
 export type BuildingScreen = 'menu' | 'review' | 'payment' | 'rejected' | 'error';
 
 export type KnownState = 'none' | 'pending' | 'paid' | 'failed';

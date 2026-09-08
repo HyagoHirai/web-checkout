@@ -1,6 +1,6 @@
 import type { App } from '../app.ts';
 import { MAX_QTY_PER_LINE, MAX_TOTAL_MINOR, MAX_UNITS_PER_ORDER, UUID_PATTERN_SOURCE } from '../../../shared/constants.ts';
-import type { OrderSubmission } from '../../../shared/wire.ts';
+import { SIMULATED_OUTCOMES, type OrderSubmission } from '../../../shared/wire.ts';
 import { interactionIdOf } from '../plugins/errors.ts';
 
 const uuid = { type: 'string', pattern: UUID_PATTERN_SOURCE } as const;
@@ -31,7 +31,7 @@ const submissionSchema = {
       type: 'object',
       additionalProperties: false,
       required: ['outcome'],
-      properties: { outcome: { type: 'string', enum: ['success', 'declined', 'inconclusive'] } },
+      properties: { outcome: { type: 'string', enum: [...SIMULATED_OUTCOMES] } },
     },
   },
 } as const;

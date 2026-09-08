@@ -15,7 +15,7 @@ describe('deadline arithmetic from persisted timestamps (research R4, data-model
     expect(inactivityDeadline(interactionOf(u))).toBe(128_000);
     expect(warningAt(interactionOf(u))).toBe(113_000);
   });
-  it("the review's counterexample: a late decline at 100 s keeps the interaction valid until 128 s", () => {
+  it('a late decline at 100 s keeps the interaction valid until the deadline in force, 128 s', () => {
     const u = reduce(submitted(0), { type: 'TICK', now: 38_000 });
     const declined = response(u, { now: 100_000, state: 'failed' });
     expect(interactionOf(declined).phase).toBe('declined');

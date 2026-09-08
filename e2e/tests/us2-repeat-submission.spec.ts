@@ -77,7 +77,7 @@ test.describe('US2: submitting more than once creates one order', () => {
   });
 });
 
-test.describe('review round three: reload and suspension in the browser', () => {
+test.describe('reload and suspension in the browser', () => {
   test('a reload before Pay loses the cart and the unsent intent; the customer starts again (spec edge case)', async ({ page }) => {
     await page.goto('/');
     await startAndAdd(page, [{ name: 'Coffee', times: 1 }]);

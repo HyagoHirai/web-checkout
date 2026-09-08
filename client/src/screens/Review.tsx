@@ -1,6 +1,6 @@
 import type { MenuItem } from '../../../shared/wire.ts';
 import { formatMinor } from '../money/format.ts';
-import { cartTotalMinor } from '../machine/reducer.ts';
+import { cartTotalMinor } from '../machine/cart.ts';
 import type { Cart } from '../machine/types.ts';
 
 interface Props {

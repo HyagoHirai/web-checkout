@@ -251,6 +251,34 @@ asks for.
 
 ---
 
+## A maintainability pass
+
+After the functional reviews, a separate review looked only at separation of responsibility,
+duplication and readability, and the owner asked for its first two tiers. Behaviour-preserving, with
+the suites as the net. What moved: the pure cart rules out of the reducer into `machine/cart.ts`
+(with a named union for the block reasons, so the copy table is checked by the compiler); the
+five-condition admission rule into `machine/admission.ts`, so it mirrors the one rule stated in the
+research, the data model and the UI contract; the submission helpers into `machine/submission.ts`,
+including the single definition of a retained submission that the reducer, the runtime and the
+error screen had each spelled out for themselves. The reducer keeps its one switch and gained two
+named blocks, hydration and menu update. The runtime's continue-to-payment flow became a named
+function beside the other lifecycle functions instead of a 37-line action. `Menu` became a layout
+over `MenuItemCard` and `CartPanel`, with the copy decisions named. `loadMenu` moved from a route
+into `db/`, taking a pool. Outcome and rejection lists are `as const` in `shared/wire.ts` with the
+types derived, as the client event names already were. An unused deadline helper and two comments
+describing behaviour that later rounds had changed were removed.
+
+The tests were reorganised by subject: files and describe blocks had been named after review
+rounds and findings, which meant a maintainer had to know the history to find a rule's coverage.
+That history is here, not in test names. Two titles promised more than their assertions: one said
+it refused a 51st unit and stopped at 24, one said a late paid was applied and only checked that
+nothing polled. The first now has the case it claimed; the second says what it checks.
+
+One thing learned while verifying: the two Playwright projects must not run concurrently against
+one stack, because both assert deltas on the API's single set of counters. The root script runs
+them in sequence; running them in parallel by hand produced one spurious failure that a solo rerun
+cleared.
+
 ## What I threw away
 
 - The `order_items` table from the first data model, in favour of a JSONB snapshot (recorded in
