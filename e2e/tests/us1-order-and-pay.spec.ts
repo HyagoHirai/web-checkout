@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { withMenuChange } from '../fixtures/db.ts';
 import { choose, delta, goToPayment, metrics, pay, REFERENCE, startAndAdd } from './kiosk.ts';
 
 test.describe('US1: order and pay at the kiosk', () => {
@@ -78,4 +79,24 @@ test('order limits are explained on screen, not in a tooltip (FR-006)', async ({
   await expect(page.locator('[data-limit="order"]')).toBeVisible();
   await expect(page.locator('[data-limit="order"]')).toHaveText('At most 50 items per order.');
   await expect(page.getByRole('button', { name: 'Review order' })).toBeEnabled(); // a full cart is still a valid one
+});
+
+test('mixed limits: an item at Max 10 next to one stopped by the total shows the monetary reason (FR-006)', async ({ page }) => {
+  await page.goto('/');
+  await withMenuChange([{ slug: 'sandwich', priceMinor: 20_000 }], async () => {
+    await page.getByRole('button', { name: 'Start your order' }).tap();
+    await page.getByRole('button', { name: 'Add Coffee' }).tap();
+    for (let i = 0; i < 9; i += 1) await page.getByRole('button', { name: 'More Coffee' }).tap();
+    await page.getByRole('button', { name: 'Add Turkey sandwich' }).tap();
+    for (let i = 0; i < 3; i += 1) await page.getByRole('button', { name: 'More Turkey sandwich' }).tap();
+    await expect(page.locator('[data-total]')).toHaveText('$835.00'); // valid, below the cap
+    await expect(page.getByRole('button', { name: 'Review order' })).toBeEnabled();
+    await expect(page.locator('.item:has-text("Coffee") [data-limit="quantity"]')).toHaveText('Max 10');
+    await expect(page.getByRole('button', { name: 'Add Turkey sandwich' })).toBeDisabled();
+    await expect(page.locator('.item:has-text("Turkey sandwich") [data-limit="total"]')).toHaveText('Over $1,000.00'); // the reason, on the card
+    // no order-wide reason: cheaper items can still be added, and adding one proves it
+    await expect(page.locator('[data-limit="order"]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Add Latte' }).tap();
+    await expect(page.locator('[data-total]')).toHaveText('$839.75');
+  });
 });

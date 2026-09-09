@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { choose, delta, goToPayment, metrics, pay, startAndAdd } from './kiosk.ts';
+import { choose, expectClientEvent, goToPayment, pay, startAndAdd } from './kiosk.ts';
 
 /** A gate the test opens, plus signals for "the server has answered" and "the client has received it". */
 function heldResponse() {
@@ -14,7 +14,6 @@ function heldResponse() {
 
 test.describe('US9: late responses never leak or regress (P3, not optional)', () => {
   test('a response for a concluded interaction never appears in the next one (FR-032)', async ({ page }) => {
-    const before = await metrics(page);
     await page.goto('/');
     await startAndAdd(page, [{ name: 'Coffee', times: 1 }]);
     await goToPayment(page);
@@ -33,17 +32,16 @@ test.describe('US9: late responses never leak or regress (P3, not optional)', ()
     await page.getByRole('button', { name: 'Start new order' }).tap();
     await page.getByRole('button', { name: 'Start your order' }).tap();
     await expect(page.locator('[data-screen="menu"]')).toBeVisible();
+    const discarded = expectClientEvent(page, 'foreign_response_discarded');
     h.release();
     await h.wasDelivered;
-    await page.waitForTimeout(500);
+    await discarded; // the browser reported the discard; delivery of the beacon is not this test's claim
     await expect(page.locator('[data-screen="menu"]')).toBeVisible();
     await expect(page.locator('[data-screen="confirmed"]')).toHaveCount(0);
-    await expect.poll(async () => delta(before, await metrics(page), 'client_event.foreign_response_discarded')).toBe(1);
   });
 
   test('a stale response never regresses a displayed final result (FR-033)', async ({ page }) => {
     await page.clock.install({ time: new Date('2026-09-07T12:00:00Z') });
-    const before = await metrics(page);
     await page.goto('/');
     await startAndAdd(page, [{ name: 'Coffee', times: 1 }]);
     await goToPayment(page);
@@ -64,12 +62,12 @@ test.describe('US9: late responses never leak or regress (P3, not optional)', ()
     await page.clock.runFor(8_500); // polling starts and finds the paid order
     await expect(page.locator('[data-screen="confirmed"]')).toBeVisible({ timeout: 10_000 });
     const referenceShown = (await page.locator('[data-reference]').textContent())!.trim();
+    const discarded = expectClientEvent(page, 'stale_response_discarded');
     h.release();
     await h.wasDelivered;
-    await page.waitForTimeout(500);
+    await discarded; // emitted for the current key, after the late arrival; delivery is proven in the API tests
     await expect(page.locator('[data-screen="confirmed"]')).toBeVisible();
     await expect(page.locator('[data-reference]')).toHaveText(referenceShown);
-    await expect.poll(async () => delta(before, await metrics(page), 'client_event.stale_response_discarded')).toBe(1);
     // and the 15 s display was not restarted by the late arrival
     await page.clock.runFor(15_500);
     await expect(page.locator('[data-screen="idle"]')).toBeVisible();

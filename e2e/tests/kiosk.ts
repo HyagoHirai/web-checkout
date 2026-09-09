@@ -56,6 +56,15 @@ export function countPosts(page: Page): { count: () => number; keys: () => strin
   return { count: () => seen.length, keys: () => seen };
 }
 
+/**
+ * Arms a wait for the browser to EMIT a client event (the beacon request leaving the page), correlated
+ * by name. Telemetry is best-effort by design (constitution VI): its delivery and counting are proven by
+ * the API integration tests, so browser tests assert emission only. Arm before the triggering action.
+ */
+export function expectClientEvent(page: Page, name: string, timeout = 10_000): Promise<Request> {
+  return page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/api/events') && (r.postData() ?? '').includes(`"name":"${name}"`), { timeout });
+}
+
 /** Read the persisted interaction record (for asserting keys and phases). */
 export async function persisted(page: Page): Promise<{ id: string; phase: string; submission: { idempotencyKey: string; reference: string | null; knownState: string } | null } | null> {
   return page.evaluate(() => {

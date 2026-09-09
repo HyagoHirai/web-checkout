@@ -289,6 +289,20 @@ document changed beyond the UI contract's S6 line. Implementing it showed that o
 carrying two different transitions, the rejected path back to the review and the declined path
 onward, so they became two events, `TRY_AGAIN` and `RETRY_PAYMENT`.
 
+A full external code review on 2026-09-09 (kept in `docs/reviews/`) found no new defect in
+submission, idempotency, persistence or admission, and two items to fix before delivery. One was a
+test that could not be stable by design: the stale-response browser test asserted that a
+best-effort beacon had been counted by the server, which telemetry never promises (constitution
+VI), and it flaked once in three runs. All five browser assertions of that kind now observe the
+browser emitting the event and leave delivery to the API integration test, which already proves
+it. The other was a real FR-006 gap: with two items at their per-item maximum and an expensive
+item stopped by the total, every Add was disabled and no monetary reason appeared, because the
+order-level rule demanded that every item be blocked by the total. The rule now considers only the
+items that could still grow, and the card names a total block on the item itself, which is the
+common case. The reviewer's other four items (a fixed 50 ms sleep in the validation-window test,
+modal focus on the inactivity warning, three unused money helpers, two lagging comments) are
+deferred, as the review itself proposed.
+
 ## What I threw away
 
 - The `order_items` table from the first data model, in favour of a JSONB snapshot (recorded in

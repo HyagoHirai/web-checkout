@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { choose, delta, goToPayment, metrics, pay, persisted, startAndAdd } from './kiosk.ts';
+import { choose, delta, expectClientEvent, goToPayment, metrics, pay, persisted, startAndAdd } from './kiosk.ts';
 
 /**
  * Timers are driven with page.clock (installed before navigation). Network is real; faults are
@@ -18,8 +18,10 @@ test.describe('US4: outcome unknown, honest about what is known', () => {
     // let the real 202 arrive (server latency 1.5 s), then drive the 30 s polling window
     await page.clock.runFor(2_500);
     await expect.poll(async () => (await persisted(page))?.submission?.knownState).toBe('pending');
+    const shown = expectClientEvent(page, 'unresolved_shown');
     await page.clock.runFor(31_000);
     await expect(page.locator('[data-screen="unresolved-known"]')).toBeVisible();
+    await shown;
     await expect(page.getByText('Do not pay again')).toBeVisible();
     await expect(page.locator('[data-reference]')).toHaveText(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$/);
     await expect(page.locator('[data-action="pay"]')).toHaveCount(0);
@@ -30,7 +32,6 @@ test.describe('US4: outcome unknown, honest about what is known', () => {
     await expect(page.locator('[data-screen="idle"]')).toBeVisible();
     const after = await metrics(page);
     expect(delta(before, after, 'payment.executed.inconclusive')).toBe(1);
-    expect(delta(before, after, 'client_event.unresolved_shown')).toBe(1);
   });
 
   test('the POST never reaches the server: S7b, no reference, no promise the counter will find anything', async ({ page }) => {

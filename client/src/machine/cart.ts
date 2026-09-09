@@ -63,10 +63,15 @@ export function canReview(cart: Cart, menu: MenuItem[] | null): boolean {
  */
 export function orderLimitReached(cart: Cart, menu: MenuItem[] | null): 'units_out_of_bounds' | 'total_out_of_bounds' | null {
   if (cartUnits(cart) >= MAX_UNITS_PER_ORDER) return 'units_out_of_bounds';
-  const available = (menu ?? []).filter((m) => m.available);
-  if (available.length === 0) return null;
-  const allBlockedByTotal = available.every((m) => cartChangeBlocker(cart, menu, m.id, (cart.lines.find((l) => l.itemId === m.id)?.quantity ?? 0) + 1) === 'total_out_of_bounds');
-  return allBlockedByTotal ? 'total_out_of_bounds' : null;
+  // Items already at their per-item maximum explain themselves on their card ("Max 10"); the order-level
+  // reason is about the items that could still grow. If every one of those is stopped by the total,
+  // the total is the reason, even when other items are at their own maximum (mixed limits).
+  const blockers = (menu ?? [])
+    .filter((m) => m.available)
+    .map((m) => cartChangeBlocker(cart, menu, m.id, (cart.lines.find((l) => l.itemId === m.id)?.quantity ?? 0) + 1))
+    .filter((b) => b !== 'quantity_out_of_bounds');
+  if (blockers.length === 0) return null;
+  return blockers.every((b) => b === 'total_out_of_bounds') ? 'total_out_of_bounds' : null;
 }
 
 /** Sets a line's quantity; zero removes the line and clears its flag (FR-004). */

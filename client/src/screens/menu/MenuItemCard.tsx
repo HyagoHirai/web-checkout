@@ -1,5 +1,5 @@
 import type { MenuItem } from '../../../../shared/wire.ts';
-import { MAX_QTY_PER_LINE } from '../../../../shared/constants.ts';
+import { MAX_QTY_PER_LINE, MAX_TOTAL_MINOR } from '../../../../shared/constants.ts';
 import { cartChangeBlocker } from '../../machine/cart.ts';
 import { formatMinor } from '../../money/format.ts';
 import type { Cart } from '../../machine/types.ts';
@@ -32,6 +32,7 @@ export function MenuItemCard({ item, cart, menu, onAdd }: Props) {
       <div className="name">
         {item.name}
         {blocker === 'quantity_out_of_bounds' && <span className="badge" data-limit="quantity">Max {MAX_QTY_PER_LINE}</span>}
+        {blocker === 'total_out_of_bounds' && <span className="badge" data-limit="total">Over {formatMinor(MAX_TOTAL_MINOR)}</span>}
       </div>
       <div className="row">
         <span className="price">{formatMinor(item.priceMinor)}</span>
