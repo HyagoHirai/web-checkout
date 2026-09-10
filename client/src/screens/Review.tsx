@@ -13,7 +13,7 @@ interface Props {
 }
 
 export function Review({ menu, cart, checking, onConfirm, onBack, onStartNew }: Props) {
-  const byId = new Map((menu ?? []).map((m) => [m.id, m]));
+  const byId = new Map((menu ?? []).map((item) => [item.id, item]));
   const total = cartTotalMinor(cart, menu);
   return (
     <div className="screen" data-screen="review">
@@ -23,13 +23,13 @@ export function Review({ menu, cart, checking, onConfirm, onBack, onStartNew }: 
       </header>
       <div className="content center">
         <div className="card">
-          {cart.lines.map((l) => {
-            const m = byId.get(l.itemId);
+          {cart.lines.map((line) => {
+            const item = byId.get(line.itemId);
             return (
-              <div key={l.itemId} className="review-line">
-                <span>{m?.name}</span>
-                <span className="hint">{l.quantity} × {formatMinor(m?.priceMinor ?? 0)}</span>
-                <span>{formatMinor((m?.priceMinor ?? 0) * l.quantity)}</span>
+              <div key={line.itemId} className="review-line">
+                <span>{item?.name}</span>
+                <span className="hint">{line.quantity} × {formatMinor(item?.priceMinor ?? 0)}</span>
+                <span>{formatMinor((item?.priceMinor ?? 0) * line.quantity)}</span>
               </div>
             );
           })}

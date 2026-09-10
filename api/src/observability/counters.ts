@@ -34,22 +34,22 @@ export interface Counters {
 /** Simple in-process counters. Created per app instance, never a module singleton (research R13). */
 export function createCounters(names: readonly string[] = COUNTER_NAMES): Counters {
   const map = new Map<string, number>();
-  for (const n of names) map.set(n, 0);
+  for (const name of names) map.set(name, 0);
   return {
     inc(name, by = 1) {
       if (!map.has(name)) throw new Error(`Unknown counter ${name}; register it in COUNTER_NAMES`);
       map.set(name, (map.get(name) ?? 0) + by);
     },
     get(name) {
-      const v = map.get(name);
-      if (v === undefined) throw new Error(`Unknown counter ${name}`);
-      return v;
+      const value = map.get(name);
+      if (value === undefined) throw new Error(`Unknown counter ${name}`);
+      return value;
     },
     snapshot() {
       return Object.fromEntries([...map.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
     },
     reset() {
-      for (const k of map.keys()) map.set(k, 0);
+      for (const name of map.keys()) map.set(name, 0);
     },
   };
 }

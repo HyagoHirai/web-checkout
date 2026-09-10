@@ -14,14 +14,14 @@ import type { Cart, FrozenLine, Interaction, Submission } from './types.ts';
  * terminal for that order, ADR-005) is never retained: editing after a decline starts a new intent.
  */
 export function retainedSubmission(interaction: Interaction): Submission | null {
-  const s = interaction.submission;
-  return s && s.sentAt !== null && s.knownState === 'none' ? s : null;
+  const submission = interaction.submission;
+  return submission && submission.sentAt !== null && submission.knownState === 'none' ? submission : null;
 }
 
 /** An intent that exists on the payment screen but was never sent; discarded by Back and by a reload. */
 export function unsentSubmission(interaction: Interaction): Submission | null {
-  const s = interaction.submission;
-  return s && s.sentAt === null ? s : null;
+  const submission = interaction.submission;
+  return submission && submission.sentAt === null ? submission : null;
 }
 
 /** Freezes the cart at the prices the customer saw, sorted by item id so a replay is byte-identical (ADR-002). */

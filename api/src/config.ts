@@ -11,17 +11,17 @@ export interface Config {
 
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
-  const v = env[name];
-  if (!v) throw new Error(`Missing required environment variable ${name}`);
-  return v;
+  const value = env[name];
+  if (!value) throw new Error(`Missing required environment variable ${name}`);
+  return value;
 }
 
 function intOr(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
-  const v = env[name];
-  if (v === undefined || v === '') return fallback;
-  const n = Number(v);
-  if (!Number.isInteger(n) || n < 0) throw new Error(`${name} must be a non-negative integer, got ${JSON.stringify(v)}`);
-  return n;
+  const value = env[name];
+  if (value === undefined || value === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${name} must be a non-negative integer, got ${JSON.stringify(value)}`);
+  return parsed;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {

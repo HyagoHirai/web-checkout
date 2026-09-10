@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { canReview, cartChangeBlocker, orderLimitReached } from '../src/machine/cart.ts';
-import { COFFEE, LATTE, MENU, PRICEY } from './helpers.ts';
+import { canReview, cartChangeBlocker, flagRejectedItems, menuWithCurrentItems, orderLimitReached } from '../src/machine/cart.ts';
+import type { ValidationRejection } from '../../shared/wire.ts';
+import { COFFEE, IID, LATTE, MENU, PRICEY } from './helpers.ts';
 
 describe('orderLimitReached: the order-level reason is about the items that could still grow (FR-006)', () => {
   it('mixed limits: two items at Max 10 and one expensive item stopped by the total → the total is the reason', () => {
@@ -24,5 +25,37 @@ describe('orderLimitReached: the order-level reason is about the items that coul
   it('something can still be added: no reason', () => {
     const cart = { lines: [{ itemId: COFFEE.id, quantity: 1 }], flagged: [] };
     expect(orderLimitReached(cart, MENU)).toBeNull();
+  });
+});
+
+describe('what a 422 does to the cart and the menu (FR-010)', () => {
+  const rejection = (partial: Partial<ValidationRejection>): ValidationRejection => ({ error: 'validation_rejected', reasons: [], interactionId: IID, ...partial });
+
+  it('flagRejectedItems: items the server reports unavailable are flagged, existing flags kept, an item flagged on both sides appears once', () => {
+    const cart = { lines: [{ itemId: COFFEE.id, quantity: 1 }, { itemId: LATTE.id, quantity: 2 }], flagged: [LATTE.id] };
+    const reported = rejection({ reasons: ['item_unavailable'], currentItems: [{ ...COFFEE, available: false }, { ...LATTE, available: false }], affectedItemIds: [COFFEE.id, LATTE.id] });
+    expect(flagRejectedItems(cart, reported).flagged).toEqual([LATTE.id, COFFEE.id]);
+  });
+  it('flagRejectedItems: with the unknown_item reason, an affected id that IS in currentItems is not treated as unknown', () => {
+    const cart = { lines: [{ itemId: COFFEE.id, quantity: 1 }], flagged: [] };
+    expect(flagRejectedItems(cart, rejection({ reasons: ['unknown_item'], currentItems: [COFFEE], affectedItemIds: [COFFEE.id] })).flagged).toEqual([]);
+  });
+  it('flagRejectedItems: an unknown item is absent from currentItems, so its affected id is flagged', () => {
+    const gone = '0a1d2c3b-0099-4a5b-8c6d-000000000099';
+    const cart = { lines: [{ itemId: gone, quantity: 1 }], flagged: [] };
+    expect(flagRejectedItems(cart, rejection({ reasons: ['unknown_item'], currentItems: [], affectedItemIds: [gone] })).flagged).toEqual([gone]);
+  });
+  it('flagRejectedItems: without the unknown_item reason, an affected id missing from currentItems is not flagged', () => {
+    const cart = { lines: [{ itemId: COFFEE.id, quantity: 1 }], flagged: [] };
+    expect(flagRejectedItems(cart, rejection({ reasons: ['price_mismatch'], currentItems: [], affectedItemIds: [COFFEE.id] })).flagged).toEqual([]);
+  });
+  it('menuWithCurrentItems: reported items replace their menu entry in place; nothing is added; no menu stays no menu', () => {
+    const repriced = { ...COFFEE, priceMinor: COFFEE.priceMinor + 25 };
+    const unlisted = { ...COFFEE, id: '0a1d2c3b-0098-4a5b-8c6d-000000000098', name: 'Not on this menu' };
+    const merged = menuWithCurrentItems(MENU, [repriced, unlisted]);
+    expect(merged?.map((item) => item.id)).toEqual(MENU.map((item) => item.id));
+    expect(merged?.find((item) => item.id === COFFEE.id)?.priceMinor).toBe(COFFEE.priceMinor + 25);
+    expect(menuWithCurrentItems(MENU, undefined)).toEqual(MENU);
+    expect(menuWithCurrentItems(null, [repriced])).toBeNull();
   });
 });

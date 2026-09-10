@@ -19,12 +19,12 @@ export type Admission =
   | { admitted: false }
   | { admitted: true; interaction: Interaction; submission: Submission; fromRetained: boolean };
 
-export function admit(live: Interaction | null, ev: Extract<Event, { type: 'RESPONSE' }>): Admission {
+export function admit(live: Interaction | null, response: Extract<Event, { type: 'RESPONSE' }>): Admission {
   if (!live || !live.submission) return { admitted: false };
-  const interaction = normalize(live, ev.now); // 1
+  const interaction = normalize(live, response.now); // 1
   if (!interaction || !interaction.submission) return { admitted: false };
-  if (interaction.id !== ev.interactionId) return { admitted: false }; // 2
-  if (interaction.submission.idempotencyKey !== ev.idempotencyKey) return { admitted: false }; // 3
+  if (interaction.id !== response.interactionId) return { admitted: false }; // 2
+  if (interaction.submission.idempotencyKey !== response.idempotencyKey) return { admitted: false }; // 3
   const fromRetained = interaction.phase === 'building' && retainedSubmission(interaction) !== null;
   if (interaction.phase !== 'submitted' && interaction.phase !== 'unresolved' && !fromRetained) return { admitted: false }; // 4, 5
   return { admitted: true, interaction, submission: interaction.submission, fromRetained };

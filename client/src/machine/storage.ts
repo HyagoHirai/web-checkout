@@ -4,10 +4,10 @@ import { INTERACTION_FORMAT_VERSION, type Interaction } from './types.ts';
 const KEY = 'webcheckout.interaction';
 
 /** Every access is wrapped: storage can throw in private windows and some embedded contexts. */
-export function save(i: Interaction | null): void {
+export function save(interaction: Interaction | null): void {
   try {
-    if (i === null) sessionStorage.removeItem(KEY);
-    else sessionStorage.setItem(KEY, JSON.stringify(i));
+    if (interaction === null) sessionStorage.removeItem(KEY);
+    else sessionStorage.setItem(KEY, JSON.stringify(interaction));
   } catch {
     /* best effort */
   }
@@ -27,8 +27,8 @@ export function readRaw(): string | null | undefined {
 }
 
 /** Whether an in-memory interaction is still the tab's current record, byte for byte. */
-export function isCurrent(i: Interaction, raw: string | null): boolean {
-  return raw !== null && raw === JSON.stringify(i);
+export function isCurrent(interaction: Interaction, raw: string | null): boolean {
+  return raw !== null && raw === JSON.stringify(interaction);
 }
 
 const PHASES = new Set(['idle', 'building', 'submitted', 'confirmed', 'declined', 'unresolved']);
@@ -41,19 +41,19 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 const isNumOrNull = (v: unknown): v is number | null => v === null || isNum(v);
 const isStr = (v: unknown): v is string => typeof v === 'string';
 
-function validLine(l: unknown): boolean {
-  const o = l as Record<string, unknown> | null;
-  return !!o && typeof o === 'object' && isStr(o.itemId) && UUID.test(o.itemId) && isStr(o.name) && isNum(o.unitPriceMinor) && isNum(o.quantity) && o.quantity >= 1;
+function validLine(value: unknown): boolean {
+  const line = value as Record<string, unknown> | null;
+  return !!line && typeof line === 'object' && isStr(line.itemId) && UUID.test(line.itemId) && isStr(line.name) && isNum(line.unitPriceMinor) && isNum(line.quantity) && line.quantity >= 1;
 }
 
-function validSubmission(s: unknown): boolean {
-  const o = s as Record<string, unknown> | null;
-  if (!o || typeof o !== 'object') return false;
-  if (!isStr(o.idempotencyKey) || !UUID.test(o.idempotencyKey)) return false;
-  if (!Array.isArray(o.lines) || !o.lines.every(validLine)) return false;
-  if (!isNum(o.expectedTotalMinor) || !isNumOrNull(o.sentAt) || !isNumOrNull(o.pollStartedAt) || !isNumOrNull(o.recordedTotalMinor)) return false;
-  if (!KNOWN.has(o.knownState as string) || !OUTCOMES.has(o.simulation as string)) return false;
-  if (o.reference !== null && !isStr(o.reference)) return false;
+function validSubmission(value: unknown): boolean {
+  const submission = value as Record<string, unknown> | null;
+  if (!submission || typeof submission !== 'object') return false;
+  if (!isStr(submission.idempotencyKey) || !UUID.test(submission.idempotencyKey)) return false;
+  if (!Array.isArray(submission.lines) || !submission.lines.every(validLine)) return false;
+  if (!isNum(submission.expectedTotalMinor) || !isNumOrNull(submission.sentAt) || !isNumOrNull(submission.pollStartedAt) || !isNumOrNull(submission.recordedTotalMinor)) return false;
+  if (!KNOWN.has(submission.knownState as string) || !OUTCOMES.has(submission.simulation as string)) return false;
+  if (submission.reference !== null && !isStr(submission.reference)) return false;
   return true;
 }
 
@@ -66,18 +66,18 @@ export function load(): Interaction | null {
   try {
     const raw = sessionStorage.getItem(KEY);
     if (!raw) return null;
-    const v = JSON.parse(raw) as Record<string, unknown>;
-    if (v.v !== INTERACTION_FORMAT_VERSION) return null;
-    if (!isStr(v.id) || !UUID.test(v.id) || !isNum(v.startedAt) || !isNum(v.lastActivityAt)) return null;
-    if (!PHASES.has(v.phase as string) || !SCREENS.has(v.screen as string)) return null;
-    if (!isNumOrNull(v.resolvedAt) || !isNumOrNull(v.deadlineAt)) return null;
-    const sub = v.submission;
-    if (sub !== null && !validSubmission(sub)) return null;
-    const phase = v.phase as string;
-    const sent = sub !== null && isNum((sub as Record<string, unknown>).sentAt);
+    const record = JSON.parse(raw) as Record<string, unknown>;
+    if (record.v !== INTERACTION_FORMAT_VERSION) return null;
+    if (!isStr(record.id) || !UUID.test(record.id) || !isNum(record.startedAt) || !isNum(record.lastActivityAt)) return null;
+    if (!PHASES.has(record.phase as string) || !SCREENS.has(record.screen as string)) return null;
+    if (!isNumOrNull(record.resolvedAt) || !isNumOrNull(record.deadlineAt)) return null;
+    const submission = record.submission;
+    if (submission !== null && !validSubmission(submission)) return null;
+    const phase = record.phase as string;
+    const sent = submission !== null && isNum((submission as Record<string, unknown>).sentAt);
     if ((phase === 'submitted' || phase === 'unresolved' || phase === 'declined' || phase === 'confirmed') && !sent) return null;
-    if (phase === 'confirmed' && !isNum(v.resolvedAt)) return null;
-    return v as unknown as Interaction;
+    if (phase === 'confirmed' && !isNum(record.resolvedAt)) return null;
+    return record as unknown as Interaction;
   } catch {
     return null;
   }

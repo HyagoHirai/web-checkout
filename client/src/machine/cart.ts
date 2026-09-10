@@ -1,5 +1,5 @@
 import { MAX_QTY_PER_LINE, MAX_TOTAL_MINOR, MAX_UNITS_PER_ORDER } from '../../../shared/constants.ts';
-import type { MenuItem } from '../../../shared/wire.ts';
+import type { MenuItem, ValidationRejection } from '../../../shared/wire.ts';
 import type { Cart } from './types.ts';
 
 /**
@@ -86,4 +86,24 @@ export function reflag(cart: Cart, menu: MenuItem[]): Cart {
   const byId = new Map(menu.map((m) => [m.id, m]));
   const flagged = cart.lines.filter((l) => !byId.get(l.itemId)?.available).map((l) => l.itemId);
   return { ...cart, flagged: [...new Set([...cart.flagged.filter((f) => cart.lines.some((l) => l.itemId === f)), ...flagged])] };
+}
+
+/** The menu with the server's current version of the items it reported; nothing is added or removed. */
+export function menuWithCurrentItems(menu: MenuItem[] | null, currentItems: MenuItem[] | undefined): MenuItem[] | null {
+  if (!menu) return menu;
+  const current = new Map((currentItems ?? []).map((item) => [item.id, item]));
+  return menu.map((item) => current.get(item.id) ?? item);
+}
+
+/**
+ * After a 422, the items the server called out are flagged so they must be acted on before the next
+ * review (FR-010): the ones it reports unavailable, and the ones it reports unknown. The server
+ * omits unknown items from currentItems, so an affected id that is not there is gone from the menu.
+ */
+export function flagRejectedItems(cart: Cart, rejection: ValidationRejection): Cart {
+  const current = rejection.currentItems ?? [];
+  const unavailableIds = current.filter((item) => !item.available).map((item) => item.id);
+  const reportedIds = new Set(current.map((item) => item.id));
+  const unknownIds = rejection.reasons.includes('unknown_item') ? (rejection.affectedItemIds ?? []).filter((id) => !reportedIds.has(id)) : [];
+  return { ...cart, flagged: [...new Set([...cart.flagged, ...unavailableIds, ...unknownIds])] };
 }

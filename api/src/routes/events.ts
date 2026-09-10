@@ -52,10 +52,10 @@ export async function eventsRoutes(app: App): Promise<void> {
         reply.code(400);
         return { error: 'bad_request', requestId: request.id };
       }
-      const ev = request.body;
-      app.counters.inc(`client_event.${ev.name}`);
+      const clientEvent = request.body;
+      app.counters.inc(`client_event.${clientEvent.name}`);
       request.log.info(
-        { event: 'client.event_received', name: ev.name, interactionId: ev.interactionId, idempotencyKey: ev.idempotencyKey, clientAt: ev.at, detail: ev.detail },
+        { event: 'client.event_received', name: clientEvent.name, interactionId: clientEvent.interactionId, idempotencyKey: clientEvent.idempotencyKey, clientAt: clientEvent.at, detail: clientEvent.detail },
         'client event',
       );
       reply.code(204);

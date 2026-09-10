@@ -60,8 +60,8 @@ export function buildApp(opts: BuildAppOptions): App {
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false, useDefaults: false, allowUnionTypes: true } },
     childLoggerFactory(logger, bindings, loggerOpts, rawReq) {
       const raw = rawReq.headers[INTERACTION_HEADER];
-      const v = Array.isArray(raw) ? raw[0] : raw;
-      if (v && UUID_PATTERN.test(v)) bindings.interactionId = v;
+      const headerValue = Array.isArray(raw) ? raw[0] : raw;
+      if (headerValue && UUID_PATTERN.test(headerValue)) bindings.interactionId = headerValue;
       return logger.child(bindings, loggerOpts);
     },
   });

@@ -6,7 +6,7 @@ import { pollDueAt, waitEndedAt } from './deadlines.ts';
 import { initialState, reduce } from './reducer.ts';
 import { clear, isCurrent, load, readRaw, save } from './storage.ts';
 import { retainedSubmission, toWire } from './submission.ts';
-import type { Event, State, Submission } from './types.ts';
+import type { Event, Interaction, Rejection, State, Submission } from './types.ts';
 import { newUuid } from './uuid.ts';
 
 export interface RuntimeOptions {
@@ -17,18 +17,21 @@ export interface RuntimeOptions {
   emit?: typeof emit;
 }
 
+/** A server response on its way to the reducer: where it came from, for which intent, and what it said. */
+type ClassifiedResponse = Omit<Extract<Event, { type: 'RESPONSE' }>, 'type' | 'now'>;
+
 /**
  * The module-level store: owns the four timers and every fetch (research R3, R4, R10). React reads
  * it through useSyncExternalStore. Timers are wall-clock deadlines checked by one ticker; nothing
  * is armed as a long setTimeout. revalidate() runs synchronously on pageshow/visibility before any
  * buffered response can be admitted.
  */
-export function createRuntime(opts: RuntimeOptions = {}) {
-  const api = opts.api ?? createApi();
-  const now = opts.now ?? (() => Date.now());
-  const tickMs = opts.tickMs ?? 250;
-  const uuid = opts.uuid ?? newUuid;
-  const telemetry = opts.emit ?? emit;
+export function createRuntime(options: RuntimeOptions = {}) {
+  const api = options.api ?? createApi();
+  const now = options.now ?? (() => Date.now());
+  const tickMs = options.tickMs ?? 250;
+  const uuid = options.uuid ?? newUuid;
+  const telemetry = options.emit ?? emit;
 
   let state: State = { ...initialState, now: now() };
   const listeners = new Set<() => void>();
@@ -37,12 +40,12 @@ export function createRuntime(opts: RuntimeOptions = {}) {
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   /** The interaction/key pair the current polling loop belongs to; polling follows the key, not the phase. */
   let pollingFor: { interactionId: string; key: string } | null = null;
-  let checkSeq = 0;
+  let lastCheckId = 0;
   const onPageShow = () => revalidate();
   const onVisibility = () => { if (document.visibilityState === 'visible') revalidate(); };
 
   function notify(): void {
-    for (const l of listeners) l();
+    for (const listener of listeners) listener();
   }
 
   function persist(prev: State, next: State): void {
@@ -52,13 +55,14 @@ export function createRuntime(opts: RuntimeOptions = {}) {
     }
   }
 
-  function dispatch(ev: Event): State {
+  /** Reduce, persist, run the effects of the transition, notify React. A refused event does none of it. */
+  function dispatch(event: Event): State {
     const prev = state;
-    const next = reduce(prev, ev);
+    const next = reduce(prev, event);
     if (next === prev) return prev;
     state = next;
     persist(prev, next);
-    afterTransition(prev, next, ev);
+    afterTransition(prev, next, event);
     notify();
     return next;
   }
@@ -73,38 +77,54 @@ export function createRuntime(opts: RuntimeOptions = {}) {
 
   /** Polling exists exactly when the current submission is `submitted` with polling started, for THAT key. */
   function reconcilePolling(): void {
-    const i = state.interaction;
-    const want = i && i.phase === 'submitted' && i.submission && i.submission.pollStartedAt !== null ? { interactionId: i.id, key: i.submission.idempotencyKey } : null;
-    const same = want && pollingFor && want.interactionId === pollingFor.interactionId && want.key === pollingFor.key;
-    if (same) return;
+    const interaction = state.interaction;
+    const wanted =
+      interaction && interaction.phase === 'submitted' && interaction.submission && interaction.submission.pollStartedAt !== null
+        ? { interactionId: interaction.id, key: interaction.submission.idempotencyKey }
+        : null;
+    const alreadyPolling = wanted && pollingFor && wanted.interactionId === pollingFor.interactionId && wanted.key === pollingFor.key;
+    if (alreadyPolling) return;
     stopPolling();
-    if (want) startPolling(want.interactionId, want.key);
+    if (wanted) startPolling(wanted.interactionId, wanted.key);
   }
 
-  /** Side effects that follow a transition; kept out of the pure reducer. */
-  function afterTransition(prev: State, next: State, ev: Event): void {
-    const pi = prev.interaction;
-    const ni = next.interaction;
-    const interactionEnded = pi && (!ni || ni.id !== pi.id);
+  /**
+   * Side effects that follow a transition, kept out of the pure reducer. Each one is keyed on a single
+   * transition: the interaction ending, the menu being asked for, the PAY that sends the POST, and the
+   * screen changes telemetry reports on.
+   */
+  function afterTransition(prev: State, next: State, event: Event): void {
+    const before = prev.interaction;
+    const after = next.interaction;
+
+    const interactionEnded = before !== null && (after === null || after.id !== before.id);
     if (interactionEnded) {
       stopPolling();
-      if (ev.type === 'TICK' && pi && pi.phase !== 'confirmed') telemetry(pi.id, 'interaction_expired', { phase: pi.phase }, pi.submission?.idempotencyKey);
+      const expiredByClock = event.type === 'TICK' && before.phase !== 'confirmed';
+      if (expiredByClock) telemetry(before.id, 'interaction_expired', { phase: before.phase }, before.submission?.idempotencyKey);
     }
-    if (!ni) return;
+    if (!after) return;
 
-    if (next.menuLoading && !prev.menuLoading) void loadMenu(ni.id);
+    const menuRequested = next.menuLoading && !prev.menuLoading;
+    if (menuRequested) void loadMenu(after.id);
 
     // The POST is sent exactly once, on PAY. A reload into `submitted` (RESUME) never re-sends: it polls by key.
-    if (ev.type === 'PAY' && ni.phase === 'submitted' && ni.submission) void sendPost(ni.id, ni.submission);
+    if (event.type === 'PAY' && after.phase === 'submitted' && after.submission) void sendPost(after.id, after.submission);
 
     reconcilePolling();
-    if (ni.phase === 'unresolved' && pi?.phase !== 'unresolved') {
-      telemetry(ni.id, 'unresolved_shown', { knownState: ni.submission?.knownState ?? 'none' }, ni.submission?.idempotencyKey);
-    }
-    if (pi?.phase === 'unresolved' && (ni.phase === 'confirmed' || ni.phase === 'declined')) {
-      telemetry(ni.id, 'late_result_applied', { phase: ni.phase }, ni.submission?.idempotencyKey);
-    }
-    if (ni.screen === 'rejected' && pi?.screen !== 'rejected') telemetry(ni.id, 'rejection_shown', { reasons: next.rejection?.reasons.join(',') ?? '' });
+    emitTransitionTelemetry(before, after, next.rejection);
+  }
+
+  /** The screen transitions the telemetry contract reports (contracts/openapi.yaml, client events). */
+  function emitTransitionTelemetry(before: Interaction | null, after: Interaction, rejection: Rejection | null): void {
+    const enteredUnresolved = after.phase === 'unresolved' && before?.phase !== 'unresolved';
+    const lateResultApplied = before?.phase === 'unresolved' && (after.phase === 'confirmed' || after.phase === 'declined');
+    const enteredRejected = after.screen === 'rejected' && before?.screen !== 'rejected';
+    const key = after.submission?.idempotencyKey;
+
+    if (enteredUnresolved) telemetry(after.id, 'unresolved_shown', { knownState: after.submission?.knownState ?? 'none' }, key);
+    if (lateResultApplied) telemetry(after.id, 'late_result_applied', { phase: after.phase }, key);
+    if (enteredRejected) telemetry(after.id, 'rejection_shown', { reasons: rejection?.reasons.join(',') ?? '' });
   }
 
   async function loadMenu(interactionId: string): Promise<void> {
@@ -119,26 +139,26 @@ export function createRuntime(opts: RuntimeOptions = {}) {
   }
 
   /** The POST is never aborted; its late result goes through the same admission rule as any other. */
-  async function sendPost(interactionId: string, sub: Submission): Promise<void> {
-    const result = await api.postOrder(toWire(sub), interactionId);
-    admit({ source: 'post', interactionId, idempotencyKey: sub.idempotencyKey, result });
+  async function sendPost(interactionId: string, submission: Submission): Promise<void> {
+    const result = await api.postOrder(toWire(submission), interactionId);
+    admit({ source: 'post', interactionId, idempotencyKey: submission.idempotencyKey, result });
   }
 
-  function admit(ev: Omit<Extract<Event, { type: 'RESPONSE' }>, 'type' | 'now'>): void {
+  /** Every response goes through the reducer's admission rule; one it refuses is counted as stale or foreign. */
+  function admit(response: ClassifiedResponse): void {
     // A conflict means an order exists under this key and may be paid: look it up (research R10).
-    if (ev.result.category === 'conflict') {
-      void api.lookupByKey(ev.idempotencyKey, ev.interactionId).then((r) => admit({ ...ev, source: 'lookup', result: r }));
+    if (response.result.category === 'conflict') {
+      void api.lookupByKey(response.idempotencyKey, response.interactionId).then((lookup) => admit({ ...response, source: 'lookup', result: lookup }));
       return;
     }
     const before = state;
-    const after = dispatch({ type: 'RESPONSE', now: now(), ...ev });
-    if (after === before) {
-      const i = state.interaction;
-      const foreign = !i || i.id !== ev.interactionId || i.submission?.idempotencyKey !== ev.idempotencyKey;
-      if (ev.result.category !== 'unknown') {
-        telemetry(i?.id ?? ev.interactionId, foreign ? 'foreign_response_discarded' : 'stale_response_discarded', { category: ev.result.category, source: ev.source }, ev.idempotencyKey);
-      }
-    }
+    const after = dispatch({ type: 'RESPONSE', now: now(), ...response });
+    if (after !== before) return;
+    if (response.result.category === 'unknown') return;
+
+    const interaction = state.interaction;
+    const foreign = !interaction || interaction.id !== response.interactionId || interaction.submission?.idempotencyKey !== response.idempotencyKey;
+    telemetry(interaction?.id ?? response.interactionId, foreign ? 'foreign_response_discarded' : 'stale_response_discarded', { category: response.result.category, source: response.source }, response.idempotencyKey);
   }
 
   function startPolling(interactionId: string, key: string): void {
@@ -147,31 +167,35 @@ export function createRuntime(opts: RuntimeOptions = {}) {
     pollController = controller;
     pollingFor = { interactionId, key };
     // Cadence is measured from the START of each poll (every 2 s), with at most one in flight.
-    const tick = async () => {
-      const i = state.interaction;
-      if (controller.signal.aborted || !i || i.id !== interactionId || i.phase !== 'submitted' || i.submission?.idempotencyKey !== key) return;
-      const end = i.submission ? waitEndedAt(i.submission) : null;
-      if (end !== null && now() >= end) return;
+    const pollOnce = async () => {
+      const interaction = state.interaction;
+      if (controller.signal.aborted || !interaction || interaction.id !== interactionId || interaction.phase !== 'submitted' || interaction.submission?.idempotencyKey !== key) return;
+      const waitEnd = interaction.submission ? waitEndedAt(interaction.submission) : null;
+      if (waitEnd !== null && now() >= waitEnd) return;
       const startedAt = now();
       const perPoll = AbortSignal.any ? AbortSignal.any([controller.signal, AbortSignal.timeout(POLL_INTERVAL_MS)]) : controller.signal;
       const result = await api.lookupByKey(key, interactionId, perPoll);
       if (controller.signal.aborted) return;
       admit({ source: 'poll', interactionId, idempotencyKey: key, result });
       if (!controller.signal.aborted && state.interaction?.phase === 'submitted') {
-        pollTimer = setTimeout(tick, Math.max(0, POLL_INTERVAL_MS - (now() - startedAt)));
+        pollTimer = setTimeout(pollOnce, Math.max(0, POLL_INTERVAL_MS - (now() - startedAt)));
       }
     };
-    void tick();
+    void pollOnce();
+  }
+
+  /** POLL_START is dispatched once the 8 s network wait is over; the reducer clamps a start that could only happen late. */
+  function startPollingIfDue(time: number): void {
+    const interaction = state.interaction;
+    if (interaction?.phase !== 'submitted' || !interaction.submission || interaction.submission.pollStartedAt !== null) return;
+    const due = pollDueAt(interaction.submission);
+    if (due !== null && time >= due) dispatch({ type: 'POLL_START', now: time });
   }
 
   function tickOnce(): void {
-    const t = now();
-    const i = state.interaction;
-    if (i?.phase === 'submitted' && i.submission && i.submission.pollStartedAt === null) {
-      const due = pollDueAt(i.submission);
-      if (due !== null && t >= due) dispatch({ type: 'POLL_START', now: t });
-    }
-    dispatch({ type: 'TICK', now: t });
+    const time = now();
+    startPollingIfDue(time);
+    dispatch({ type: 'TICK', now: time });
   }
 
   /**
@@ -180,25 +204,22 @@ export function createRuntime(opts: RuntimeOptions = {}) {
    * from storage: RESUME. Both run synchronously before any buffered response can be admitted.
    */
   function revalidate(): void {
-    const t = now();
+    const time = now();
     const live = state.interaction;
     if (live) {
       // A document restored from the back/forward cache keeps its heap. If another document in this
       // tab has since moved on (reset, new interaction, new attempt), this one's memory is stale: it
       // abandons its state and hydrates the tab's current record (FR-028). It never writes over it.
       const raw = readRaw();
-      if (raw === undefined || isCurrent(live, raw)) dispatch({ type: 'TICK', now: t });
-      else dispatch({ type: 'RESUME', now: t, interaction: load() });
+      if (raw === undefined || isCurrent(live, raw)) dispatch({ type: 'TICK', now: time });
+      else dispatch({ type: 'RESUME', now: time, interaction: load() });
     } else {
-      dispatch({ type: 'RESUME', now: t, interaction: load() });
+      dispatch({ type: 'RESUME', now: time, interaction: load() });
     }
-    const ni = state.interaction;
-    if (ni && ni.phase === 'submitted' && ni.submission && ni.submission.pollStartedAt === null) {
-      const due = pollDueAt(ni.submission);
-      if (due !== null && t >= due) dispatch({ type: 'POLL_START', now: t });
-    }
+    startPollingIfDue(time);
     reconcilePolling();
-    if (ni && !state.menu && ni.phase !== 'idle' && !state.menuLoading) void loadMenu(ni.id);
+    const current = state.interaction;
+    if (current && !state.menu && current.phase !== 'idle' && !state.menuLoading) void loadMenu(current.id);
   }
 
   function boot(): void {
@@ -220,17 +241,17 @@ export function createRuntime(opts: RuntimeOptions = {}) {
    *   anything else (network, 5xx, unrecognised body) → nothing is known, nothing new starts.
    */
   function continueToPayment(): void {
-    const i = state.interaction;
-    const retained = i && i.phase === 'building' ? retainedSubmission(i) : null;
-    if (!i || !retained) {
+    const interaction = state.interaction;
+    const retained = interaction && interaction.phase === 'building' ? retainedSubmission(interaction) : null;
+    if (!interaction || !retained) {
       dispatch({ type: 'GO_PAYMENT', now: now(), idempotencyKey: uuid() });
       return;
     }
-    const checkId = ++checkSeq;
+    const checkId = ++lastCheckId;
     const before = state;
     const after = dispatch({ type: 'CHECK_START', now: now(), checkId });
     if (after === before) return; // a check is already in flight, or the screen is not the review
-    const interactionId = i.id;
+    const interactionId = interaction.id;
     const key = retained.idempotencyKey;
     void api.lookupByKey(key, interactionId).then((result) => {
       // Identity first: a check abandoned by any navigation, or belonging to an ended interaction,
@@ -262,9 +283,9 @@ export function createRuntime(opts: RuntimeOptions = {}) {
 
   return {
     getState: () => state,
-    subscribe(l: () => void) {
-      listeners.add(l);
-      return () => listeners.delete(l);
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
     dispatch,
     boot,
@@ -285,8 +306,8 @@ export function createRuntime(opts: RuntimeOptions = {}) {
       pay: () => dispatch({ type: 'PAY', now: now() }),
       continueSession: () => dispatch({ type: 'CONTINUE', now: now() }),
       retryAfterError: () => {
-        const i = state.interaction;
-        if (i && state.error?.kind === 'menu_unreachable') telemetry(i.id, 'service_unreachable', { screen: 'menu' });
+        const interaction = state.interaction;
+        if (interaction && state.error?.kind === 'menu_unreachable') telemetry(interaction.id, 'service_unreachable', { screen: 'menu' });
         dispatch({ type: 'RETRY_AFTER_ERROR', now: now() });
       },
       tryAgain: () => dispatch({ type: 'TRY_AGAIN', now: now() }),

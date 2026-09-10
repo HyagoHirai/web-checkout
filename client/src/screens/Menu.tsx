@@ -8,7 +8,7 @@ interface Props {
   loading: boolean;
   cart: Cart;
   onAdd: (id: string) => void;
-  onSetQty: (id: string, q: number) => void;
+  onSetQty: (id: string, quantity: number) => void;
   onRemove: (id: string) => void;
   onReview: () => void;
   onStartNew: () => void;

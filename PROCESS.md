@@ -303,6 +303,43 @@ common case. The reviewer's other four items (a fixed 50 ms sleep in the validat
 modal focus on the inactivity warning, three unused money helpers, two lagging comments) are
 deferred, as the review itself proposed.
 
+## A readability pass
+
+While reading the code to answer his own questions about it, the owner found that some functions
+were hard to follow: `afterTransition` in the runtime read as a run of unrelated `if`s, and locals
+named `pi`, `ni`, `sub`, `fp`, `i`, `a`, `r` had to be decoded by scrolling back to their
+declaration. His question was whether that counts in a take-home. It does, and more than in
+production code: the reviewer reads cold, with limited time, and readability is usually an explicit
+criterion. The line drawn for the pass was behaviour: renames, named conditions and pure
+extractions are covered by the suites; adding layers or abstractions would not make the code easier
+to read at this size, and was not done.
+
+What changed, on 2026-09-09. Every abbreviated local in `client/src/machine`, `client/src/api`, the
+two screens that iterate the cart, and the API's service, server, config and plugins now carries
+its full name (`interaction`, `submission`, `fingerprint`, `response`, `candidate`, `value`).
+`afterTransition` names each transition it reacts to (`interactionEnded`, `expiredByClock`,
+`menuRequested`) and hands the three screen-telemetry events to `emitTransitionTelemetry`, so the
+behavioural effects and the observability are read separately. The duplicated "start polling if
+the 8 s wait is over" check in `tickOnce` and `revalidate` is one `startPollingIfDue`. In the
+reducer, `applyResponse` is now a dispatcher over the response category: the outcome transitions
+live in `applyOutcome`, the 422 handling in `applyRejection`, and the cart arithmetic that the
+422 case had inlined (merging the server's current items into the menu, flagging unavailable and
+unknown items) moved to `cart.ts` as `menuWithCurrentItems` and `flagRejectedItems`, with unit
+tests of their own. In the API, `submit` reads as the seven numbered steps of research R5 with
+the 422 body in `rejectionOf` and the post-commit window in `executePayment`; the step comments
+were corrected while there (the record step is 7, not 8, and the payment is step 6 alone).
+
+Verification: typecheck, the client and API suites, and the two browser projects in sequence,
+before and after the last round of renames. In between, four independent reviewer agents compared
+HEAD with the working tree function by function, and two further agents tried to refute each of
+their 26 claims. None was a behaviour change. The confirmed claims were abbreviations the pass
+had missed (`opts`, `res`, `err`, a `q` in a props signature, a `type Response` alias that
+shadowed the DOM type) and two weak assertions in the new cart tests, all applied. Three
+pre-existing gaps they surfaced are left as they are: no test pins the detail or key of the
+`interaction_expired`, `rejection_shown` and `stale_response_discarded` events, and the
+reload-then-422 path is exercised in the browser, not through the reducer alone. Nothing exported
+changed its name and no existing test assertion changed.
+
 ## What I threw away
 
 - The `order_items` table from the first data model, in favour of a JSONB snapshot (recorded in

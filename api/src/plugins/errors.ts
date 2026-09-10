@@ -4,9 +4,9 @@ import { UUID_PATTERN } from '../../../shared/constants.ts';
 import { INTERACTION_HEADER } from '../../../shared/wire.ts';
 
 export function interactionIdOf(request: FastifyRequest): string | undefined {
-  const v = request.headers[INTERACTION_HEADER];
-  const s = Array.isArray(v) ? v[0] : v;
-  return s && UUID_PATTERN.test(s) ? s : undefined;
+  const header = request.headers[INTERACTION_HEADER];
+  const value = Array.isArray(header) ? header[0] : header;
+  return value && UUID_PATTERN.test(value) ? value : undefined;
 }
 
 /**

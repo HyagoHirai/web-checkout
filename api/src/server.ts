@@ -15,10 +15,10 @@ import { buildApp, type BootInfo } from './app.ts';
  */
 export async function boot(config: Config, logger: Logger, pool: Pool, counters = createCounters()): Promise<{ app: ReturnType<typeof buildApp>; bootInfo: BootInfo }> {
   await waitForDatabase(pool, logger);
-  const m = await migrate(pool, logger);
-  logger.info({ event: 'startup.migrations_applied', applied: m.applied, latest: m.latest }, 'migrations applied');
-  const s = await seed(pool);
-  logger.info({ event: 'startup.seed_applied', inserted: s.inserted, updated: s.updated }, 'seed applied');
+  const migrations = await migrate(pool, logger);
+  logger.info({ event: 'startup.migrations_applied', applied: migrations.applied, latest: migrations.latest }, 'migrations applied');
+  const seeding = await seed(pool);
+  logger.info({ event: 'startup.seed_applied', inserted: seeding.inserted, updated: seeding.updated }, 'seed applied');
   const simulator = createSimulator({
     defaultOutcome: config.simulatorDefaultOutcome,
     latencyMs: config.simulatorLatencyMs,
@@ -28,7 +28,7 @@ export async function boot(config: Config, logger: Logger, pool: Pool, counters 
     { event: 'startup.simulator_configured', defaultOutcome: simulator.defaultOutcome, acceptClientHint: simulator.acceptClientHint, latencyMs: simulator.latencyMs },
     'simulator configured',
   );
-  const bootInfo: BootInfo = { migrations: m.latest, seed: s.inserted > 0 ? 'applied' : 'already-present' };
+  const bootInfo: BootInfo = { migrations: migrations.latest, seed: seeding.inserted > 0 ? 'applied' : 'already-present' };
   const app = buildApp({ pool, simulator, logger, counters, boot: bootInfo });
   return { app, bootInfo };
 }
