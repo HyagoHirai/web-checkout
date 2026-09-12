@@ -400,7 +400,7 @@ the AI got it wrong". All reproduced; all are fixed with tests whose clock jumps
 minor items (polling cadence measured from the start of a poll, listeners removed on stop, HTTP
 bodies validated before the reducer sees them, per-test app teardown) were applied as well.
 
-**Round four** (the external agent from rounds one and two, on commit `122aade`) found one critical, one high and two
+**Round four** (the external agent from rounds one and two, on commit `6ad0456`) found one critical, one high and two
 medium defects, all reproduced: the bfcache restore of an ended interaction; a rejection treated as
 proof about the whole intent; bounds not re-checked after a re-pricing; a 409 recovery showing the
 wrong total. All fixed with regressions, the bfcache ones with `persisted === true` asserted. The
@@ -409,14 +409,14 @@ remains for the owner: FR-009 says "No order MUST be created for a rejected subm
 ADR-002 (higher precedence) qualifies to "by a rejected request"; the spec's sentence was not
 edited by the agent.
 
-**Round five** (the same external agent, on commit `1a5114e`) found two high and two medium
+**Round five** (the same external agent, on commit `58b423b`) found two high and two medium
 defects in the runtime, all reproduced: the last check releasing a new key on a transport failure;
 declined keys kept into editing; polling not following the key on a restored document; an
 abandoned check's continuation navigating. All four fixed with runtime and browser regressions.
 The `404` exception in the last check is now an explicit, documented rule in the contract, the UI
 contract and the research, rather than a divergence between them.
 
-**Round six** (the same external agent, on commit `8a9573a`) found one high and three medium
+**Round six** (the same external agent, on commit `f5bc5d4`) found one high and three medium
 defects, all reproduced and fixed with regressions: an unrecognised 404 body releasing a new key;
 check identity by screen and object rather than by id; a late menu refresh stranding an unsent
 intent on the payment screen; error copy asserting no charge while a key was kept. Two minor
@@ -424,7 +424,7 @@ items were applied as well: a client event whose body fails to parse is now coun
 and the `404` exception was carried into its owning documents, ADR-002 and FR-024, dated and
 marked for the owner to confirm.
 
-**Round seven** (the same external agent, on the whole implementation at `a935d89`) found one
+**Round seven** (the same external agent, on the whole implementation at `dff2fb1`) found one
 high defect (a late rejection erasing a known acceptance), four medium ones (a stuck menu-loading
 flag; the ops script able to start the demo stack; bounded decrements; limits explained only in a
 tooltip) and one low (the pool error counter unwired in production). All reproduced and fixed with
