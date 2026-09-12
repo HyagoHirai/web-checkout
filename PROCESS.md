@@ -2,6 +2,15 @@
 
 *A record of the process, written as it happened rather than reconstructed afterwards.*
 
+**The five-minute version.** The brief was read and five decisions were written as ADRs, with
+decision matrices, before any tooling. The specification and constitution followed, by hand.
+Spec Kit turned them into a plan, which the owner reviewed twice before a line of code. The code
+was generated task by task, P1 first, and then reviewed seven times, two rounds on the documents
+and five on the code, each code finding reproduced before it was fixed and each fix carrying a
+regression test. Where the AI was wrong, it is written down ("Where the AI got it wrong"); where
+its recommendations were overruled, and on what evidence, too ("Where I overrode the tooling").
+The rest of this document is the detail, in the order it happened.
+
 ---
 
 ## Before any tooling
@@ -289,7 +298,8 @@ document changed beyond the UI contract's S6 line. Implementing it showed that o
 carrying two different transitions, the rejected path back to the review and the declined path
 onward, so they became two events, `TRY_AGAIN` and `RETRY_PAYMENT`.
 
-A full external code review on 2026-09-09 (kept in `docs/reviews/`) found no new defect in
+A full external code review on 2026-09-09 (its findings are recorded here and in the commit that
+applied them; the review text itself is not part of the repository) found no new defect in
 submission, idempotency, persistence or admission, and two items to fix before delivery. One was a
 test that could not be stable by design: the stale-response browser test asserted that a
 best-effort beacon had been counted by the server, which telemetry never promises (constitution
@@ -325,7 +335,7 @@ reducer, `applyResponse` is now a dispatcher over the response category: the out
 live in `applyOutcome`, the 422 handling in `applyRejection`, and the cart arithmetic that the
 422 case had inlined (merging the server's current items into the menu, flagging unavailable and
 unknown items) moved to `cart.ts` as `menuWithCurrentItems` and `flagRejectedItems`, with unit
-tests of their own. In the API, `submit` reads as the seven numbered steps of research R5 with
+tests of their own. In the API, `submit` reads as the numbered steps of research R5 with
 the 422 body in `rejectionOf` and the post-commit window in `executePayment`; the step comments
 were corrected while there (the record step is 7, not 8, and the payment is step 6 alone).
 
@@ -339,6 +349,52 @@ pre-existing gaps they surfaced are left as they are: no test pins the detail or
 `interaction_expired`, `rejection_shown` and `stale_response_discarded` events, and the
 reload-then-422 path is exercised in the browser, not through the reducer alone. Nothing exported
 changed its name and no existing test assertion changed.
+
+## A pre-delivery pass
+
+Before submitting, the owner asked whether the work was at the level the process demanded, and
+whether it could go as it was. Rather than answer from the inside, five independent reviewer
+agents were given the repository cold, each with one lens (backend and data; client architecture;
+tests and operations; process, documentation and AI use; and one that only did what a reviewer does
+in the first twenty minutes: read the README, run the one command, walk the failure-path table,
+drive the kiosk). Every blocker they raised was then challenged by a refuter with the code in
+front of it. Four lenses judged the work senior, one staff; none would have submitted it as it
+stood. Of eleven blockers, nine were downgraded to "mention in the interview" on verification.
+Two survived, both minutes to fix and both real.
+
+The first was a telemetry defect: every ordinary poll of a pending order restated the same state,
+the reducer returned the state unchanged, and the runtime read "unchanged" as "refused" and
+emitted `stale_response_discarded`. The counter meant to evidence US9 was saturated by the normal
+case. The rule that a response merely restates the known state now lives in `admission.ts`
+(`restatesKnownState`) and is shared by the reducer, which applies nothing, and the runtime, which
+reports nothing; a runtime test holds a POST open, polls pending four times without a beacon, then
+releases the POST after the paid poll and asserts the stale beacon for that one. The second was
+that the 4 KiB limit on `/api/events` applied only to the `text/plain` parser: an unauthenticated
+endpoint accepted a 5 KB `application/json` body and logged it whole. The limit is now a route
+option, so it covers every parser, strings inside `detail` are bounded, an oversized body is a
+counted 413, and the contract says so.
+
+The rest was hygiene the panel found in minutes and a reviewer would too: the 50 ms sleep in the
+validation-window test replaced by a handshake on the hook; the unused money helpers removed and
+the used ones actually called from the validation; the review-screen label corrected in the
+quickstart, the UI contract and the tasks; the bfcache proof credited to the project that holds
+it; three tracked `.DS_Store` files removed; the Spec Kit scaffold comment and the ratification
+TODO removed from the constitution; `engines` aligned with the research and the Dockerfiles; a
+dangling reference to a review folder that was never committed; test titles that named review
+rounds instead of behaviour; the spec's status field (`Implemented`, not `Draft`); a second
+sitting of the same panel, which found two more things a person at the kiosk notices in the first
+minute: a cart row that jumped to the bottom on every quantity change (`setLine` removed and
+re-appended the line; it now changes it in place), and a stopped API leaving the previous menu
+on screen, interactive, for up to a minute while the proxy waited on a connection (the menu fetch
+is now bounded by the same 8 s wait as a submission, and nginx gives up connecting after 5 s).
+The review screen also now requires a loaded menu, as the payment screen already did; and the
+five-minute summary at the top of this document. One more thing the second sitting asked to be
+said plainly: on 2026-09-09 the history was rewritten once, to remove an AI co-author trailer
+that the tooling had appended to every commit message; trees, authorship, dates and bodies are
+unchanged, and the round commits cited above are the rewritten ones. Nothing else changed. What the panel called nits, and did not block on, is left for the interview: the
+unused `orders_created_at_idx`, status codes decided in two layers, the unauthenticated `/api/metrics`
+on the kiosk network, no React error boundary, no CI workflow, and the documentation being larger
+than the code.
 
 ## What I threw away
 

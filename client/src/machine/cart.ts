@@ -74,10 +74,16 @@ export function orderLimitReached(cart: Cart, menu: MenuItem[] | null): 'units_o
   return blockers.every((b) => b === 'total_out_of_bounds') ? 'total_out_of_bounds' : null;
 }
 
-/** Sets a line's quantity; zero removes the line and clears its flag (FR-004). */
+/**
+ * Sets a line's quantity; zero removes the line and clears its flag (FR-004). An existing line keeps
+ * its place: on a touch screen the row must not move out from under the finger that changed it.
+ */
 export function setLine(cart: Cart, itemId: string, quantity: number): Cart {
-  const lines = cart.lines.filter((l) => l.itemId !== itemId);
-  if (quantity > 0) lines.push({ itemId, quantity });
+  const exists = cart.lines.some((l) => l.itemId === itemId);
+  const lines =
+    quantity <= 0 ? cart.lines.filter((l) => l.itemId !== itemId)
+    : exists ? cart.lines.map((l) => (l.itemId === itemId ? { itemId, quantity } : l))
+    : [...cart.lines, { itemId, quantity }];
   return { lines, flagged: cart.flagged.filter((f) => f !== itemId || quantity > 0) };
 }
 

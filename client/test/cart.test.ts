@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { canReview, cartChangeBlocker, flagRejectedItems, menuWithCurrentItems, orderLimitReached } from '../src/machine/cart.ts';
+import { canReview, cartChangeBlocker, flagRejectedItems, menuWithCurrentItems, orderLimitReached, setLine } from '../src/machine/cart.ts';
 import type { ValidationRejection } from '../../shared/wire.ts';
-import { COFFEE, IID, LATTE, MENU, PRICEY } from './helpers.ts';
+import { COFFEE, IID, LATTE, MENU, PRICEY, SOUP } from './helpers.ts';
 
 describe('orderLimitReached: the order-level reason is about the items that could still grow (FR-006)', () => {
   it('mixed limits: two items at Max 10 and one expensive item stopped by the total → the total is the reason', () => {
@@ -25,6 +25,18 @@ describe('orderLimitReached: the order-level reason is about the items that coul
   it('something can still be added: no reason', () => {
     const cart = { lines: [{ itemId: COFFEE.id, quantity: 1 }], flagged: [] };
     expect(orderLimitReached(cart, MENU)).toBeNull();
+  });
+});
+
+describe('setLine keeps the order of the cart (a row must not move under the finger that changed it)', () => {
+  const cart = { lines: [{ itemId: COFFEE.id, quantity: 1 }, { itemId: LATTE.id, quantity: 2 }, { itemId: PRICEY.id, quantity: 1 }], flagged: [] };
+  it('changing a quantity leaves the line where it was', () => {
+    expect(setLine(cart, COFFEE.id, 3).lines.map((l) => [l.itemId, l.quantity])).toEqual([[COFFEE.id, 3], [LATTE.id, 2], [PRICEY.id, 1]]);
+  });
+  it('a new item goes to the end; zero removes the line and its flag', () => {
+    expect(setLine(cart, SOUP.id, 1).lines.map((l) => l.itemId)).toEqual([COFFEE.id, LATTE.id, PRICEY.id, SOUP.id]);
+    const flagged = { ...cart, flagged: [LATTE.id] };
+    expect(setLine(flagged, LATTE.id, 0)).toEqual({ lines: [{ itemId: COFFEE.id, quantity: 1 }, { itemId: PRICEY.id, quantity: 1 }], flagged: [] });
   });
 });
 

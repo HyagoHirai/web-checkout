@@ -10,7 +10,7 @@
     "e2e"
   ],
   "engines": {
-    "node": ">=24 <25 || >=25"
+    "node": ">=24 <25 || >=26"
   },
   "scripts": {
     "typecheck": "npm run typecheck -w api && npm run typecheck -w client",

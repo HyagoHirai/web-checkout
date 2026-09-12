@@ -49,7 +49,7 @@ Conventions for every screen:
 
 - Shows: the complete order and its total, exactly the total that will be submitted (FR-007,
   FR-008).
-- Actions: **Confirm and pay** → S3; **Back** → S1 (cart intact); **Start new order**.
+- Actions: **Continue to payment** → S3 (after the last check of a retained key, if any); **Back** → S1 (cart intact); **Start new order**.
 - Satisfies: US1 scenario 6.
 
 ### S3 Simulated payment

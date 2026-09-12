@@ -1,6 +1,6 @@
-import { CURRENCY, MAX_TOTAL_MINOR, MAX_UNITS_PER_ORDER } from '../../../shared/constants.ts';
+import { CURRENCY, MAX_UNITS_PER_ORDER } from '../../../shared/constants.ts';
 import type { MenuItem, OrderSubmission, RejectionReason } from '../../../shared/wire.ts';
-import { orderTotalMinor, quantityWithinBounds } from './money.ts';
+import { lineTotalMinor, orderTotalMinor, quantityWithinBounds, totalWithinBounds } from './money.ts';
 
 export interface MenuRow {
   id: string;
@@ -80,14 +80,14 @@ export function validateSubmission(body: OrderSubmission, menu: readonly MenuRow
       name: row.name,
       unitPriceMinor: row.price_minor,
       quantity: line.quantity,
-      lineTotalMinor: row.price_minor * line.quantity,
+      lineTotalMinor: lineTotalMinor(row.price_minor, line.quantity),
     });
   }
   if (units > MAX_UNITS_PER_ORDER) reasons.add('units_out_of_bounds');
 
   const currentTotal = orderTotalMinor(snapshotLines);
   const allKnown = !reasons.has('unknown_item') && !reasons.has('duplicate_item');
-  if (allKnown && (currentTotal < 1 || currentTotal > MAX_TOTAL_MINOR)) reasons.add('total_out_of_bounds');
+  if (allKnown && !totalWithinBounds(currentTotal)) reasons.add('total_out_of_bounds');
   if (allKnown && body.lines.length > 0 && currentTotal !== body.expectedTotalMinor) {
     reasons.add('price_mismatch');
     for (const l of snapshotLines) affected.add(l.itemId);

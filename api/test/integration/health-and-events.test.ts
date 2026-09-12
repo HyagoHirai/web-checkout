@@ -34,7 +34,22 @@ describe('observability surface (constitution VI)', () => {
   });
 });
 
-describe('round six, minor: a body that fails to parse is still counted as a rejected client event', () => {
+describe('an event endpoint that anyone on the network can reach is bounded', () => {
+  it.each(['application/json', 'text/plain;charset=UTF-8'] as const)('a body over 4 KiB as %s is 413 and counted, whatever the content type', async (type) => {
+    const ev = { interactionId: randomUUID(), name: 'unresolved_shown', at: Date.now(), detail: { pad: 'x'.repeat(5_000) } };
+    const r = await t.app.inject({ method: 'POST', url: '/api/events', headers: { 'content-type': type }, payload: JSON.stringify(ev) });
+    expect(r.statusCode).toBe(413);
+    expect((await metrics(t.app))['client_event.rejected']).toBe(1);
+  });
+  it('a detail string longer than 256 characters is 400 and counted, so a log line is bounded even under the body limit', async () => {
+    const ev = { interactionId: randomUUID(), name: 'unresolved_shown', at: Date.now(), detail: { pad: 'x'.repeat(300) } };
+    const r = await t.app.inject({ method: 'POST', url: '/api/events', headers: { 'content-type': 'application/json' }, payload: ev });
+    expect(r.statusCode).toBe(400);
+    expect((await metrics(t.app))['client_event.rejected']).toBe(1);
+  });
+});
+
+describe('a body that fails to parse is still counted as a rejected client event', () => {
   it.each([
     ['application/json', '{not json'],
     ['text/plain;charset=UTF-8', '{not json'],

@@ -17,7 +17,7 @@ function barrier(n: number) {
 }
 
 describe('US2: N concurrent same-key POSTs (SC-002, ADR-002 "only one request performs the payment")', () => {
-  const N = 8; // below pool.max (10): each blocked competitor holds a pool client
+  const N = 8; // below pool.max (10): once released, each competitor holds a pool client while blocked on the winner's uncommitted INSERT
   let t: TestApp;
   beforeEach(async () => {
     const b = barrier(N);

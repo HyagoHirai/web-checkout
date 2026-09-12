@@ -19,17 +19,18 @@ function fakeFetch() {
   let onPost: Handler = () => json(201, orderStatus('paid'));
   let onGet: Handler = () => json(404, { error: 'not_found' });
   let menu = MENU;
+  let onMenu: Handler | null = null;
   const impl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
     const headers = Object.fromEntries(Object.entries((init?.headers as Record<string, string>) ?? {}));
     calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined, headers });
-    if (url === '/api/menu') return json(200, { currency: 'USD', items: menu });
+    if (url === '/api/menu') return onMenu ? onMenu(url, init) : json(200, { currency: 'USD', items: menu });
     if (url === '/api/orders' && method === 'POST') return onPost(url, init);
     if (url.startsWith('/api/orders/by-key/')) return onGet(url, init);
     return json(404, { error: 'not_found' });
   }) as typeof fetch;
-  return { impl, calls, setPost: (h: Handler) => { onPost = h; }, setGet: (h: Handler) => { onGet = h; }, setMenu: (m: typeof MENU) => { menu = m; }, posts: () => calls.filter((c) => c.method === 'POST' && c.url === '/api/orders'), gets: () => calls.filter((c) => c.url.startsWith('/api/orders/by-key/')) };
+  return { impl, calls, setPost: (h: Handler) => { onPost = h; }, setGet: (h: Handler) => { onGet = h; }, setMenu: (m: typeof MENU) => { menu = m; }, setMenuHandler: (h: Handler) => { onMenu = h; }, posts: () => calls.filter((c) => c.method === 'POST' && c.url === '/api/orders'), gets: () => calls.filter((c) => c.url.startsWith('/api/orders/by-key/')) };
 }
 
 let rt: Runtime;
@@ -184,6 +185,27 @@ describe('the bounded wait, polling, unknown outcomes and late results (US4: FR-
     expect(i.phase).toBe('unresolved');
     expect(i.submission?.reference).toBe('PEND');
   });
+  it('repeated pending polls are admitted as nothing new and never reported as stale; a pending after the final result is (US9 telemetry stays meaningful)', async () => {
+    let releasePost!: (r: Response) => void;
+    ff.setPost(() => new Promise<Response>((r) => { releasePost = r; })); // the POST stays open
+    ff.setGet(() => json(200, orderStatus('pending_payment', IID, { reference: 'PEND', replay: true })));
+    await toPayment();
+    rt.actions.pay();
+    await vi.advanceTimersByTimeAsync(16_100); // 8 s network wait, then four polls each restating pending/PEND
+    expect(rt.getState().interaction?.submission?.knownState).toBe('pending');
+    expect(ff.gets().length).toBeGreaterThanOrEqual(4);
+    expect(emitted).not.toContain('stale_response_discarded');
+    expect(emitted).not.toContain('foreign_response_discarded');
+    ff.setGet(() => json(200, orderStatus('paid', IID, { reference: 'PEND', replay: true })));
+    await vi.advanceTimersByTimeAsync(2_100);
+    expect(rt.getState().interaction?.phase).toBe('confirmed');
+    // the still-open POST now answers with a pending: stale by the admission rule, and reported as such
+    releasePost(json(202, orderStatus('pending_payment', IID, { reference: 'PEND' })));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rt.getState().interaction?.phase).toBe('confirmed');
+    expect(emitted).toContain('stale_response_discarded');
+  });
+
   it('a generic 500 is unknown, never a decline', async () => {
     ff.setPost(() => json(500, { error: 'internal' }));
     await toPayment();
@@ -216,6 +238,19 @@ describe('the bounded wait, polling, unknown outcomes and late results (US4: FR-
 });
 
 describe('unreachable before submission (US8: FR-026)', () => {
+  it('a menu fetch that never answers fails after the 8 s network wait, so a stopped API behind a patient proxy still reaches the error screen', async () => {
+    let released = false;
+    ff.setMenuHandler(() => new Promise<Response>((r) => { setTimeout(() => { released = true; r(json(200, { currency: 'USD', items: MENU })); }, 60_000); }));
+    rt.actions.start();
+    await vi.advanceTimersByTimeAsync(7_900);
+    expect(rt.getState().interaction?.screen).toBe('menu');
+    expect(rt.getState().menuLoading).toBe(true);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(rt.getState().interaction?.screen).toBe('error');
+    expect(rt.getState().error?.kind).toBe('menu_unreachable');
+    expect(released).toBe(false);
+  });
+
   it('menu failure shows the error screen; retry re-fetches and emits service_unreachable', async () => {
     const good = ff.impl;
     let fail = true;
@@ -389,7 +424,7 @@ describe('the last check: failures, declined keys, polling ownership, abandoned 
     ['network failure', () => Promise.reject(new TypeError('Failed to fetch'))],
     ['500', () => json(500, { error: 'internal' })],
     ['unrecognised body', () => json(200, { hello: 'world' })],
-  ] as const)('finding 1: when the last check fails (%s) no new key is created; the kept key stays and the customer can retry', async (_n, handler) => {
+  ] as const)('when the last check fails (%s) no new key is created; the kept key stays and the customer can retry', async (_n, handler) => {
     await rejectedThenReview();
     ff.setGet(handler as Handler);
     rt.actions.goPayment();
@@ -479,7 +514,7 @@ describe('the last check: unrecognised 404s and check identity; late menu update
     ['HTML 404', () => new Response('<html>Not Found</html>', { status: 404, headers: { 'content-type': 'text/html' } })],
     ['invalid JSON 404', () => new Response('{oops', { status: 404, headers: { 'content-type': 'application/json' } })],
     ['JSON 404 with another error', () => json(404, { error: 'route_missing' })],
-  ] as const)('finding 1: a 404 whose body is not the API\'s not_found (%s) keeps the key and starts nothing', async (_n, handler) => {
+  ] as const)('a 404 whose body is not the API\'s not_found (%s) keeps the key and starts nothing', async (_n, handler) => {
     await rejectedThenReview();
     ff.setGet(handler as Handler);
     rt.actions.goPayment();

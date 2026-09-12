@@ -62,6 +62,20 @@ describe('US1: cart rules (FR-002..FR-006)', () => {
   });
 });
 
+describe('the review needs a menu (a cart rebuilt from frozen lines after a reload has none until the fetch lands)', () => {
+  it('GO_REVIEW is refused while the menu is null, like GO_PAYMENT; it is accepted once the menu arrives', () => {
+    const rec = interactionOf(submitted(t));
+    const restored = run([{ type: 'RESUME', now: t + 1_000, interaction: rec }], { ...submitted(t), interaction: null, cart: { lines: [], flagged: [] }, menu: null });
+    const declined = response(restored, { now: t + 1_500, state: 'failed' });
+    expect(declined.cart.lines).toEqual([{ itemId: COFFEE.id, quantity: 2 }]);
+    expect(declined.menu).toBeNull();
+    const tooEarly = reduce(declined, { type: 'GO_REVIEW', now: t + 2_000 });
+    expect(tooEarly).toBe(declined);
+    const withMenu = reduce(declined, { type: 'MENU_LOADED', now: t + 2_000, items: MENU });
+    expect(interactionOf(reduce(withMenu, { type: 'GO_REVIEW', now: t + 2_100 })).screen).toBe('review');
+  });
+});
+
 describe('US2: the intent is frozen from first send (ADR-002)', () => {
   it('PAY stamps sentAt; a second PAY is a no-op', () => {
     const s = submitted(t);

@@ -80,14 +80,16 @@ describe('ADR-002 "The validation window": recorded, not closed', () => {
   it('a same-key request rejected by validation while a concurrent one is mid-insert: the accepted one pays once; the rejection is per request', async () => {
     let releaseA!: () => void;
     const gate = new Promise<void>((r) => { releaseA = r; });
+    let arrivedA!: () => void;
+    const arrived = new Promise<void>((r) => { arrivedA = r; }); // A has validated and is paused before its insert
     let first = true;
-    const tt = await makeTestApp({ hooks: { beforeInsert: async () => { if (first) { first = false; await gate; } } } });
+    const tt = await makeTestApp({ hooks: { beforeInsert: async () => { if (first) { first = false; arrivedA(); await gate; } } } });
     await truncateOrders(tt.pool);
     await resetMenu(tt.pool);
     try {
       const body = submission([{ slug: 'coffee', quantity: 2 }]); // 700 at the price the client saw
       const a = post(tt.app, body); // validates at 350, pauses before insert
-      await new Promise((r) => setTimeout(r, 50));
+      await arrived;
       await setMenuItem(tt.pool, 'coffee', { priceMinor: 400 });
       const b = await post(tt.app, body); // same key, validates at 400 → 422; its two lookups find nothing yet
       expect(b.statusCode).toBe(422);

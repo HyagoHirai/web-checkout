@@ -36,3 +36,12 @@ export const DEFINITENESS: Record<KnownState, number> = { none: 0, pending: 1, p
 export function knownStateOf(status: OrderStatus): KnownState {
   return status.state === 'pending_payment' ? 'pending' : status.state;
 }
+
+/**
+ * A response that restates what is already known about the submission: same state, same
+ * reference. Every ordinary poll of a pending order is one. It is admitted and applies nothing;
+ * it is not a stale or foreign response and is never reported as one.
+ */
+export function restatesKnownState(submission: Submission, status: OrderStatus): boolean {
+  return knownStateOf(status) === submission.knownState && status.reference === submission.reference;
+}

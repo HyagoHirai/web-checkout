@@ -187,7 +187,8 @@ paths:
             schema: { $ref: "#/components/schemas/ClientEvent" }
       responses:
         "204": { description: Recorded }
-        "400": { description: Malformed body or unknown event name. Counted as `client_event.rejected`. }
+        "400": { description: Malformed body, unknown event name, or a `detail` string over 256 characters. Counted as `client_event.rejected`. }
+        "413": { description: Body over 4 KiB, whatever the content type. Counted as `client_event.rejected`. }
 
   /api/metrics:
     get:
@@ -365,5 +366,5 @@ components:
         at: { type: integer, description: Client epoch ms }
         detail:
           type: object
-          additionalProperties: { type: [string, integer, boolean] }
+          additionalProperties: { type: [string, integer, boolean], maxLength: 256 }
           maxProperties: 8

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * Round seven, finding 3: the operational acceptance must act on its own compose project only. A
+ * The operational acceptance must act on its own compose project only. A
  * configured webServer would run `docker compose up --build` on the DEMO stack whenever the demo URL
  * is down (for example, an API stopped on purpose for a presentation) before these tests even start.
  */

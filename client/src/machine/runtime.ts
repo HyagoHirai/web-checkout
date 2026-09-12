@@ -1,7 +1,8 @@
 import type { SimulatedOutcome } from '../../../shared/wire.ts';
-import { POLL_INTERVAL_MS } from '../../../shared/constants.ts';
+import { NETWORK_WAIT_MS, POLL_INTERVAL_MS } from '../../../shared/constants.ts';
 import { createApi, type Api } from '../api/client.ts';
 import { emit } from '../api/telemetry.ts';
+import { admit as admissionOf, restatesKnownState } from './admission.ts';
 import { pollDueAt, waitEndedAt } from './deadlines.ts';
 import { initialState, reduce } from './reducer.ts';
 import { clear, isCurrent, load, readRaw, save } from './storage.ts';
@@ -127,14 +128,23 @@ export function createRuntime(options: RuntimeOptions = {}) {
     if (enteredRejected) telemetry(after.id, 'rejection_shown', { reasons: rejection?.reasons.join(',') ?? '' });
   }
 
+  /**
+   * The menu fetch is bounded by the same wait as a submission (FR-025): a proxy that cannot reach a
+   * stopped API may hold the connection open far longer, and the customer would be building on the
+   * previous menu the whole time. A fetch that outlives the wait is treated as a failure.
+   */
   async function loadMenu(interactionId: string): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('menu: no answer within the network wait')), NETWORK_WAIT_MS); });
     try {
-      const menu = await api.fetchMenu();
+      const menu = await Promise.race([api.fetchMenu(), timeout]);
       if (state.interaction?.id !== interactionId) return;
       dispatch({ type: 'MENU_LOADED', now: now(), items: menu.items });
     } catch {
       if (state.interaction?.id !== interactionId) return;
       dispatch({ type: 'MENU_FAILED', now: now() });
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -144,17 +154,24 @@ export function createRuntime(options: RuntimeOptions = {}) {
     admit({ source: 'post', interactionId, idempotencyKey: submission.idempotencyKey, result });
   }
 
-  /** Every response goes through the reducer's admission rule; one it refuses is counted as stale or foreign. */
+  /**
+   * Every response goes through the reducer's admission rule. One that changes nothing is reported as
+   * stale or foreign, except a response the rule admitted that merely restates the known state (an
+   * ordinary poll of a pending order): that is the normal case, not a discard.
+   */
   function admit(response: ClassifiedResponse): void {
     // A conflict means an order exists under this key and may be paid: look it up (research R10).
     if (response.result.category === 'conflict') {
       void api.lookupByKey(response.idempotencyKey, response.interactionId).then((lookup) => admit({ ...response, source: 'lookup', result: lookup }));
       return;
     }
+    const event = { type: 'RESPONSE' as const, now: now(), ...response };
+    const admission = admissionOf(state.interaction, event);
     const before = state;
-    const after = dispatch({ type: 'RESPONSE', now: now(), ...response });
+    const after = dispatch(event);
     if (after !== before) return;
     if (response.result.category === 'unknown') return;
+    if (admission.admitted && response.result.category === 'outcome' && restatesKnownState(admission.submission, response.result.status)) return;
 
     const interaction = state.interaction;
     const foreign = !interaction || interaction.id !== response.interactionId || interaction.submission?.idempotencyKey !== response.idempotencyKey;

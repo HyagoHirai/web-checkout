@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-07
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: the owner's specification "Specification — Web Checkout"
 (`docs/specification.md`), supplied verbatim to `/speckit-specify`. This document restates it in

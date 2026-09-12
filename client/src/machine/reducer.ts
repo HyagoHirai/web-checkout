@@ -1,6 +1,6 @@
 import { NETWORK_WAIT_MS } from '../../../shared/constants.ts';
 import type { MenuItem, OrderStatus, ValidationRejection } from '../../../shared/wire.ts';
-import { admit, DEFINITENESS, knownStateOf, type Admission } from './admission.ts';
+import { admit, DEFINITENESS, knownStateOf, restatesKnownState, type Admission } from './admission.ts';
 import { canReview, cartBlocker, cartChangeBlocker, flagRejectedItems, menuWithCurrentItems, reflag, setLine } from './cart.ts';
 import { inactivityDeadline, isExpired, normalize } from './deadlines.ts';
 import { cartFromFrozen, isRepriced, newSubmission, retainedSubmission, unsentSubmission } from './submission.ts';
@@ -100,7 +100,7 @@ function applyOutcome(state: State, admission: AdmittedResponse, status: OrderSt
       // the retained key turned out to exist and is pending: no new intent, no pay-again (S7a)
       return { ...state, rejection: null, interaction: { ...interaction, phase: 'unresolved', screen: 'menu', submission: nextSubmission } };
     }
-    if (submission.knownState === 'pending' && submission.reference === status.reference) return state; // nothing new
+    if (restatesKnownState(submission, status)) return state; // an ordinary poll: nothing new
     const pollStartedAt = submission.pollStartedAt ?? now; // an early pending starts polling now (research R10)
     return { ...state, interaction: { ...interaction, submission: { ...nextSubmission, pollStartedAt } } };
   }
@@ -236,7 +236,7 @@ export function reduce(state: State, event: Event): State {
       if (interaction.phase !== 'building' && interaction.phase !== 'declined') return state;
       return { ...state, now, cart: setLine(state.cart, event.itemId, 0), interaction: { ...stamped, phase: 'building', screen: 'menu', submission: retainedSubmission(interaction) } };
     case 'GO_REVIEW':
-      if ((interaction.phase !== 'building' && interaction.phase !== 'declined') || !canReview(state.cart, state.menu)) return state;
+      if ((interaction.phase !== 'building' && interaction.phase !== 'declined') || !state.menu || !canReview(state.cart, state.menu)) return state;
       return { ...state, now, rejection: null, interaction: { ...stamped, phase: 'building', screen: 'review', submission: retainedSubmission(interaction) } };
     case 'GO_MENU':
       if (interaction.phase !== 'building' && interaction.phase !== 'declined') return state;

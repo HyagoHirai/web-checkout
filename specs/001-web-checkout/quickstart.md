@@ -44,7 +44,7 @@ curl -s localhost:8080/api/health
 2. Add items, change quantities, set one to zero (it disappears), try an unavailable item (it cannot
    be added), try an eleventh of one item (refused with a reason).
 3. **Review**: the complete order and its total.
-4. **Confirm and pay** → simulated payment screen: says it is simulated, one **Pay** control, the
+4. **Continue to payment** → simulated payment screen: says it is simulated, one **Pay** control, the
    terminal-answer selector on Approve.
 5. **Pay** → waiting state appears immediately → confirmation with a 4-character reference.
 6. Wait 15 s: the kiosk returns to idle by itself.
@@ -111,7 +111,7 @@ where:
 | Price authority over the total and bounds, server side (FR-006, FR-008, FR-009) | `validation.test.ts` | 422 with reasons; no row; key reusable; exactly-at-bound accepted, one beyond rejected; `"1250"` as a string → 400; two prices moving by equal and opposite amounts → accepted (the guarantee is over the total) |
 | Reference alphabet and collision retry (FR-012) | `reference.test.ts` | no 0/O/1/I/L; forced collision → retry → distinct reference; 5 failures → 503 `reference_exhausted`, no row |
 | Interface: every screen and transition in `contracts/ui-states.md` | `e2e/tests/*.spec.ts` | one spec per user story; `page.clock` drives 8/2/30/15/90/15 s; `page.route` produces lost response, 500, 404, late result; metrics deltas prove at-most-one |
-| Nothing survives reset or expiry, on both back/forward paths (FR-028) | `e2e/tests/us5-abandonment.spec.ts` | bfcache-restored and fresh-load navigations both show idle |
+| Nothing survives reset or expiry, on both back/forward paths (FR-028) | `e2e/tests/us5-abandonment.spec.ts`, `e2e/tests-bfcache/bfcache.spec.ts` | fresh-load navigations show idle (kiosk project); real bfcache restores, asserted with `pageshow.persisted === true`, show idle or adopt the tab's current record (kiosk-bfcache project) |
 | Stack from empty; restart preserves orders and does not duplicate seed (constitution X) | `e2e/ops/acceptance.spec.ts` | health `seed` transitions `applied` → `already-present`; order by key survives `down`/`up` |
 
 ## Observability check

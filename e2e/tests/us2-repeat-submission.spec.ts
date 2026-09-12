@@ -88,7 +88,7 @@ test.describe('reload and suspension in the browser', () => {
     await expect(page.getByRole('button', { name: 'Review order' })).toBeDisabled();
   });
 
-  test('a decline after a reload can be retried with the same items (finding 5)', async ({ page }) => {
+  test('a decline after a reload can be retried with the same items', async ({ page }) => {
     await page.goto('/');
     await startAndAdd(page, [{ name: 'Coffee', times: 2 }]);
     await goToPayment(page);
@@ -106,7 +106,7 @@ test.describe('reload and suspension in the browser', () => {
     await expect(page.locator('[data-screen="payment"] [data-total]')).toHaveText('$7.00');
   });
 
-  test('switching tabs keeps the cart (finding 2)', async ({ page, context }) => {
+  test('switching tabs keeps the cart', async ({ page, context }) => {
     await page.goto('/');
     await startAndAdd(page, [{ name: 'Coffee', times: 2 }]);
     const other = await context.newPage();

@@ -25,7 +25,7 @@ describe('startup ordering (ADR-004, research R13)', () => {
     expect(seedLine?.updated).toBe(0);
   });
 
-  it('a pool error on the production wiring is counted where it is served (round seven, minor)', async () => {
+  it('a pool error on the production wiring is counted where it is served', async () => {
     const config = { databaseUrl: TEST_DATABASE_URL, port: 0, logLevel: 'silent', simulatorDefaultOutcome: 'success' as const, simulatorAcceptClientHint: true, simulatorLatencyMs: 0 };
     const logger = pino({ level: 'silent' });
     const counters = createCounters();

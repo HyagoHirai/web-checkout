@@ -7,8 +7,8 @@ import type { Interaction } from '../src/machine/types.ts';
 import { atPayment, COFFEE, IID, interactionOf, K1, K2, MENU, response, run, submitted } from './helpers.ts';
 
 /**
- * Review round three: the clock jumps while the app is suspended (bfcache, tab restore, laptop
- * lid), and the page reloads mid-flow. Every case here failed before the fix.
+ * The clock jumps while the app is suspended (bfcache, tab restore, laptop lid), and the page
+ * reloads mid-flow. Every rule here was once wrong in the same way: the tests only ticked the clock.
  */
 describe('a suspended `submitted` interaction is normalised by the clock on resume', () => {
   const sent = submitted(0); // sentAt 0, lastActivityAt 0
@@ -83,7 +83,7 @@ describe('a reload before PAY discards the unsent intent (spec edge case)', () =
 });
 
 describe('a decline after a reload can be retried with the frozen lines', () => {
-  it('RESUME of a submitted record rebuilds the cart from the frozen lines; failed → Try again reaches review', () => {
+  it('RESUME of a submitted record rebuilds the cart from the frozen lines; failed → Try again goes straight to payment with a new key', () => {
     const rec = interactionOf(submitted(0));
     const restored = reduce({ ...submitted(0), interaction: null, cart: { lines: [], flagged: [] } }, { type: 'RESUME', now: 1_000, interaction: rec });
     expect(restored.cart.lines).toEqual([{ itemId: COFFEE.id, quantity: 2 }]);

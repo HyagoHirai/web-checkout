@@ -1,47 +1,3 @@
-<!--
-Sync Impact Report
-==================
-Version change: (unfilled template scaffold, no prior version) → 1.0.0
-  Rationale: initial ratification. The owner's draft is labelled "Version 1.0";
-  rendered as 1.0.0 to fit the MAJOR.MINOR.PATCH scheme that Spec Kit amendments use.
-
-Modified principles: none renamed. The scaffold carried five unnamed placeholder
-slots; ten named principles replace them:
-  I.    Money is never trusted from the client
-  II.   Order submission is idempotent by construction
-  III.  Write the intent durably before performing the action
-  IV.   Interactive state does not outlive the interaction
-  V.    Failure paths are first-class
-  VI.   If it can fail silently, it must be observable
-  VII.  Scope is a decision, and omissions are deliberate
-  VIII. Proportionality, with the trade-off stated
-  IX.   Decisions are recorded
-  X.    One setup command
-
-Added sections:
-  - Decision Records: an index resolving the "See ADR-00x" references to the files
-    in docs/adr/. Agent-added reference material derived from the repository; it
-    states no rule. Strike it if unwanted.
-  - Governance subsections from the owner's draft: Who decides; Precedence; Silent
-    change is prohibited; Amendment; Amendment log.
-  - One agent-added paragraph in Governance › Amendment defining the
-    MAJOR.MINOR.PATCH scheme, so that the version number has a stated meaning.
-    Proposed, not decided — see "Who decides".
-
-Removed sections:
-  - Template slot [SECTION_3_NAME]: not used; the owner's draft supplies no content
-    for it.
-
-Source: docs/constitution-draft.md, matching the text supplied to the command.
-Principle and governance wording is preserved verbatim apart from line wrapping and
-the two agent additions listed above.
-
-Follow-up TODOs:
-  - TODO(RATIFICATION_DATE): the owner's draft says the ratification date is to be
-    recorded by the project owner and not inferred from document metadata. Left as a
-    TODO in the version line until the owner records it.
--->
-
 # Web Checkout Constitution
 
 *Non-negotiable principles for this project. The reasoning behind each is in `docs/adr/`.*
@@ -203,6 +159,6 @@ for clarifications and wording that change no rule.
 
 ### Amendment log
 
-1.0.0 — initial ratification. Ratification date to be recorded by the project owner.
+1.0.0 — initial ratification, 2026-09-07.
 
-**Version**: 1.0.0 | **Ratified**: TODO(RATIFICATION_DATE): to be recorded by the project owner, not inferred from document metadata | **Last Amended**: 2026-09-07
+**Version**: 1.0.0 | **Ratified**: 2026-09-07 | **Last Amended**: 2026-09-07

@@ -23,8 +23,9 @@ In this order, and the commit history shows it:
    review rounds on the plan came before a line of code.
 4. **Implementation followed the tasks, P1 first**: API, client, then browser and operational
    tests.
-5. **Seven review rounds on the result**, every finding reproduced before it was fixed and each fix
-   carrying a regression test; then a UI pass, a maintainability pass and a readability pass.
+5. **Seven review rounds**, two on the documents and five on the code; every code finding was
+   reproduced before it was fixed and each fix carries a regression test. Then a UI pass, a
+   maintainability pass, a readability pass and a pre-delivery pass.
    `PROCESS.md` records all of it, including where the AI got it wrong and where its
    recommendations were overruled.
 
@@ -75,7 +76,7 @@ without a second device. The amount is always recomputed by the server from its 
 | Declined | Selector → Decline → Pay |
 | Unknown outcome, order recorded | Selector → No answer → Pay; after 30 s of polling the screen says to check at the counter with the reference |
 | Unknown outcome, nothing recorded | `docker compose stop api` between Review and Pay, then Pay; after the wait, the screen says it could not confirm the order went through |
-| Service unreachable | `docker compose stop api`, then tap Start or reload; `docker compose start api` and Try again |
+| Service unreachable | `docker compose stop api`, then tap Start or reload: the error screen within the 8 s network wait; `docker compose start api` and Try again |
 | Price changed | With a cart open: `docker compose exec -T db psql -U checkout -d webcheckout -c "UPDATE menu_items SET price_minor = price_minor + 50 WHERE slug = 'coffee'"` then Pay |
 | Item unavailable | `… SET available = false WHERE slug = 'coffee'` then Pay |
 | Abandonment | Stop touching for 75 s: a warning; at 90 s the screen resets |
@@ -96,7 +97,7 @@ Requires Node 24 (`.nvmrc`) and, for the interface tests, `npx playwright instal
 ```bash
 npm ci
 npm test            # type-check, API unit + integration (real Postgres via docker compose), client unit
-npm run test:e2e    # Playwright at 1024×768 with touch, against the compose stack (starts it if needed)
+npm run test:e2e    # Playwright at 1024×768 with touch, against the compose stack (starts it if needed; a running stack is reused as is, so rebuild first after a code change)
 npm run test:ops    # the two ADR-004 operational scenarios, in a separate compose project
 ```
 
