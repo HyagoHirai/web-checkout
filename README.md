@@ -8,6 +8,29 @@ nothing from one customer survives into the next interaction.
 The reasoning lives in `docs/adr/` (five decision records written before any code) and the
 specification, plan and design in `specs/001-web-checkout/`. `PROCESS.md` records how it was built.
 
+## How this was built
+
+In this order, and the commit history shows it:
+
+1. **The brief was read and five decisions were taken before any tooling.** Scope, idempotent
+   submission, price authority, persistence, order lifecycle: each an ADR in `docs/adr/` with the
+   alternatives weighed in a decision matrix and the residual risks named.
+2. **The specification and the constitution were written by hand from those decisions**:
+   `docs/specification.md` and `docs/constitution-draft.md`, with the numbers (timers, bounds,
+   currency, reference format) left open as values to be confirmed rather than guessed.
+3. **Spec Kit turned them into a spec-driven plan**: constitution, specify, clarify (where the open
+   values were set), plan, tasks, analyze. Everything under `specs/001-web-checkout/`. Two owner
+   review rounds on the plan came before a line of code.
+4. **Implementation followed the tasks, P1 first**: API, client, then browser and operational
+   tests.
+5. **Seven review rounds on the result**, every finding reproduced before it was fixed and each fix
+   carrying a regression test; then a UI pass, a maintainability pass and a readability pass.
+   `PROCESS.md` records all of it, including where the AI got it wrong and where its
+   recommendations were overruled.
+
+When documents disagree, the precedence fixed in the constitution decides: constitution, then
+ADRs, then specification, then plan, then tasks and code.
+
 ## Run it
 
 **Prerequisite**: Docker Desktop, or Docker Engine ≥ 25 with the Compose and Buildx plugins.
