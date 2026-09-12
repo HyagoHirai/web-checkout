@@ -375,7 +375,8 @@ changed its name and no existing test assertion changed.
 
 ## Review rounds
 
-This set of documents went through two rounds of external review before any code was written.
+Two rounds of external review on the documents before any code was written, then five on the
+code as it was corrected. In the order they happened:
 
 **Round one** (on the first plan, research, data model and contracts) found: nginx chosen without
 its reason recorded; four documents repeating a stale "silent data loss" story about the Postgres
@@ -383,6 +384,45 @@ volume path that the verifier had already corrected; three incompatible test-run
 incompatible TypeScript execution models; `format: uuid` in the contract versus a strict pattern in
 the research; the interaction id in the body in one document and in a header in another. All
 refinements, resolved by reconciliation.
+
+**Round two** (on the corrected documents) found genuine defects, not refinements: the deadline
+regression on a late decline; response admission keyed on the interaction rather than the intent;
+a contradictory 409 classification; a seed comparison that could never report "unchanged"; and a
+claim that a race was closed when it was only narrowed. The owner's instruction after that round
+was to fix them, run one analysis pass, and build, because "each round found real things, but the
+point of diminishing return is close". The analysis pass found nothing above MEDIUM. What the
+tests found during implementation is in "Where the AI got it wrong", which is where it belongs;
+the rounds below are what reviewers found in the implemented code afterwards.
+
+**Round three** (by another agent, on the implemented code, after the owner's "no further
+review round" on the documents) found the seven suspension-and-reload defects listed under "Where
+the AI got it wrong". All reproduced; all are fixed with tests whose clock jumps. The reviewer's
+minor items (polling cadence measured from the start of a poll, listeners removed on stop, HTTP
+bodies validated before the reducer sees them, per-test app teardown) were applied as well.
+
+**Round four** (the external agent from rounds one and two, on commit `122aade`) found one critical, one high and two
+medium defects, all reproduced: the bfcache restore of an ended interaction; a rejection treated as
+proof about the whole intent; bounds not re-checked after a re-pricing; a 409 recovery showing the
+wrong total. All fixed with regressions, the bfcache ones with `persisted === true` asserted. The
+contract and UI contract now state what a 422 does and does not prove. One document conflict
+remains for the owner: FR-009 says "No order MUST be created for a rejected submission", which
+ADR-002 (higher precedence) qualifies to "by a rejected request"; the spec's sentence was not
+edited by the agent.
+
+**Round five** (the same external agent, on commit `1a5114e`) found two high and two medium
+defects in the runtime, all reproduced: the last check releasing a new key on a transport failure;
+declined keys kept into editing; polling not following the key on a restored document; an
+abandoned check's continuation navigating. All four fixed with runtime and browser regressions.
+The `404` exception in the last check is now an explicit, documented rule in the contract, the UI
+contract and the research, rather than a divergence between them.
+
+**Round six** (the same external agent, on commit `8a9573a`) found one high and three medium
+defects, all reproduced and fixed with regressions: an unrecognised 404 body releasing a new key;
+check identity by screen and object rather than by id; a late menu refresh stranding an unsent
+intent on the payment screen; error copy asserting no charge while a key was kept. Two minor
+items were applied as well: a client event whose body fails to parse is now counted as rejected,
+and the `404` exception was carried into its owning documents, ADR-002 and FR-024, dated and
+marked for the owner to confirm.
 
 **Round seven** (the same external agent, on the whole implementation at `a935d89`) found one
 high defect (a late rejection erasing a known acceptance), four medium ones (a stuck menu-loading
@@ -396,42 +436,3 @@ the earlier wording as the same overreach as the "closes the write-window race" 
 about the intent when the mechanism only guarantees something about the request. At the owner's
 instruction ADR-002's "Where this still breaks" now also records that the re-confirmation check
 narrows the window rather than closing it, so the exception cannot read as a fix.
-
-**Round six** (the same external agent, on commit `8a9573a`) found one high and three medium
-defects, all reproduced and fixed with regressions: an unrecognised 404 body releasing a new key;
-check identity by screen and object rather than by id; a late menu refresh stranding an unsent
-intent on the payment screen; error copy asserting no charge while a key was kept. Two minor
-items were applied as well: a client event whose body fails to parse is now counted as rejected,
-and the `404` exception was carried into its owning documents, ADR-002 and FR-024, dated and
-marked for the owner to confirm.
-
-**Round five** (the same external agent, on commit `1a5114e`) found two high and two medium
-defects in the runtime, all reproduced: the last check releasing a new key on a transport failure;
-declined keys kept into editing; polling not following the key on a restored document; an
-abandoned check's continuation navigating. All four fixed with runtime and browser regressions.
-The `404` exception in the last check is now an explicit, documented rule in the contract, the UI
-contract and the research, rather than a divergence between them.
-
-**Round four** (the same external agent, on commit `122aade`) found one critical, one high and two
-medium defects, all reproduced: the bfcache restore of an ended interaction; a rejection treated as
-proof about the whole intent; bounds not re-checked after a re-pricing; a 409 recovery showing the
-wrong total. All fixed with regressions, the bfcache ones with `persisted === true` asserted. The
-contract and UI contract now state what a 422 does and does not prove. One document conflict
-remains for the owner: FR-009 says "No order MUST be created for a rejected submission", which
-ADR-002 (higher precedence) qualifies to "by a rejected request"; the spec's sentence was not
-edited by the agent.
-
-**Round three** (by another agent, on the implemented code, after the owner's "no further
-review round" on the documents) found the seven suspension-and-reload defects listed under "Where
-the AI got it wrong". All reproduced; all are fixed with tests whose clock jumps. The reviewer's
-minor items (polling cadence measured from the start of a poll, listeners removed on stop, HTTP
-bodies validated before the reducer sees them, per-test app teardown) were applied as well.
-
-**Round two** (on the corrected documents) found genuine defects, not refinements: the deadline
-regression on a late decline; response admission keyed on the interaction rather than the intent;
-a contradictory 409 classification; a seed comparison that could never report "unchanged"; and a
-claim that a race was closed when it was only narrowed. The owner's instruction after that round
-was to fix them, run one analysis pass, and build, because "each round found real things, but the
-point of diminishing return is close". The analysis pass found nothing above MEDIUM. Everything
-found after that is in the section above, found by tests during implementation, which is where it
-belongs.
